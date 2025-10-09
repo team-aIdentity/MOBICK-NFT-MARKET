@@ -1,0 +1,14 @@
+// 컨트랙트 주소들 (thirdweb v5)
+export const NFT_CONTRACT_ADDRESS =
+  "0xD39E02bDaf4AD5685e42e64BcAc1e4b60e2Af628"; // 새로 배포한 NFT Collection
+export const ALTERNATIVE_NFT_CONTRACT_ADDRESS =
+  "0x950C48726a06517762252409b63F4B6fFE44A585"; // NFT Drop (백업용)
+export const MARKETPLACE_CONTRACT_ADDRESS =
+  "0x738c8706366681f143FD3a18Eb477183041c6B59"; // Base Sepolia Marketplace V3 (thirdweb)
+export const ALTERNATIVE_MARKETPLACE_CONTRACT_ADDRESS =
+  "0x738c8706366681f143FD3a18Eb477183041c6B59"; // Marketplace V3 주소 (백업)
+export const PAY_TOKEN_CONTRACT_ADDRESS =
+  "0x25C2F65Efe4624Cb1c009A4c0FD8540515Dbe71B"; // SBMB 토큰
+
+// Base Sepolia 체인 ID
+export const CHAIN_ID = 84532; // Base Sepolia 테스트넷
