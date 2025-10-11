@@ -215,102 +215,69 @@ export default function CollectionPage() {
               "🧹 실제 소유한 NFT가 있으므로 로컬 스토리지 정리 완료"
             );
 
-            // 소유한 NFT의 tokenId 조회 및 데이터 구성
-            console.log(`🔄 ${ownedCount}개의 NFT 조회 시작...`);
+            // 소유한 NFT의 tokenId 조회 및 데이터 구성 (병렬 처리)
+            const nftPromises = [];
             for (let i = 0; i < ownedCount; i++) {
-              try {
-                console.log(`📝 NFT #${i} 조회 중...`);
-                const tokenId = await readContract({
-                  contract: nftContract,
-                  method:
-                    "function tokenOfOwnerByIndex(address owner, uint256 index) view returns (uint256)",
-                  params: [connectedAddress, BigInt(i)],
-                });
-
-                console.log(
-                  `✅ 소유한 NFT #${i}: tokenId = ${tokenId.toString()}`
-                );
-
-                // tokenURI 조회
-                let tokenURI = "";
-                try {
-                  tokenURI = await readContract({
-                    contract: nftContract,
-                    method:
-                      "function tokenURI(uint256 tokenId) view returns (string)",
-                    params: [BigInt(Number(tokenId))],
-                  });
-                  console.log(`📝 NFT #${tokenId} TokenURI:`, tokenURI);
-                } catch (uriError) {
-                  console.log(
-                    `📝 NFT #${tokenId} TokenURI 조회 실패:`,
-                    uriError
-                  );
-                }
-
-                // 메타데이터 가져오기
-                let metadata = null;
-                if (tokenURI) {
+              nftPromises.push(
+                (async () => {
                   try {
-                    // IPFS URL인 경우 여러 게이트웨이 시도
-                    let response;
-                    if (tokenURI.startsWith("ipfs://")) {
-                      const ipfsHash = tokenURI.replace("ipfs://", "");
-                      const gateways = [
-                        `https://gateway.pinata.cloud/ipfs/${ipfsHash}`,
-                        `https://gateway.pinata.cloud/ipfs/${ipfsHash}?pinataGatewayToken=UHWXvO0yfhuWgUiWlPTtdQKSA7Bp1lRpAAXAcYzZ__PuxBCvtJ2W7Brth4Q6V8UI`,
-                        `https://cloudflare-ipfs.com/ipfs/${ipfsHash}`,
-                        `https://dweb.link/ipfs/${ipfsHash}`,
-                        `https://ipfs.io/ipfs/${ipfsHash}`,
-                        `https://gateway.ipfs.io/ipfs/${ipfsHash}`,
-                      ];
+                    const tokenId = await readContract({
+                      contract: nftContract,
+                      method:
+                        "function tokenOfOwnerByIndex(address owner, uint256 index) view returns (uint256)",
+                      params: [connectedAddress, BigInt(i)],
+                    });
 
-                      let success = false;
-                      for (const gateway of gateways) {
-                        try {
-                          console.log(
-                            `📝 NFT #${tokenId} IPFS 시도: ${gateway}`
-                          );
-                          response = await fetch(gateway, {
-                            cache: "no-store",
-                            headers: {
-                              Accept: "application/json",
-                            },
-                          });
-                          if (response.ok) {
-                            console.log(
-                              `✅ NFT #${tokenId} IPFS 성공: ${gateway}`
-                            );
-                            success = true;
-                            break;
-                          }
-                        } catch (gatewayError) {
-                          console.log(
-                            `❌ NFT #${tokenId} IPFS 실패: ${gateway}`,
-                            gatewayError
-                          );
-                        }
-                      }
-
-                      if (!success) {
-                        throw new Error("모든 IPFS 게이트웨이 실패");
-                      }
-                    } else {
-                      // 일반 URL인 경우
-                      response = await fetch(tokenURI, {
-                        cache: "no-store",
+                    // tokenURI 조회
+                    let tokenURI = "";
+                    try {
+                      tokenURI = await readContract({
+                        contract: nftContract,
+                        method:
+                          "function tokenURI(uint256 tokenId) view returns (string)",
+                        params: [BigInt(Number(tokenId))],
                       });
+                    } catch (uriError) {
+                      // URI 조회 실패
                     }
 
-                    metadata = await response.json();
-                    console.log(`📝 NFT #${tokenId} 메타데이터:`, metadata);
-                  } catch (metaError) {
-                    console.log(
-                      `📝 NFT #${tokenId} 메타데이터 가져오기 실패:`,
-                      metaError
-                    );
-                  }
-                }
+                    // 메타데이터 가져오기 (빠른 병렬 조회)
+                    let metadata = null;
+                    if (tokenURI) {
+                      try {
+                        if (tokenURI.startsWith("ipfs://")) {
+                          const ipfsHash = tokenURI.replace("ipfs://", "");
+                          const gateways = [
+                            `https://gateway.pinata.cloud/ipfs/${ipfsHash}?pinataGatewayToken=UHWXvO0yfhuWgUiWlPTtdQKSA7Bp1lRpAAXAcYzZ__PuxBCvtJ2W7Brth4Q6V8UI`,
+                            `https://cloudflare-ipfs.com/ipfs/${ipfsHash}`,
+                          ];
+
+                          // 병렬 요청
+                          const fetchPromises = gateways.map((gateway) =>
+                            fetch(gateway, {
+                              cache: "no-store",
+                              headers: { Accept: "application/json" },
+                              signal: AbortSignal.timeout(5000),
+                            })
+                              .then((res) => (res.ok ? res.json() : null))
+                              .catch(() => null)
+                          );
+
+                          const results = await Promise.all(fetchPromises);
+                          metadata = results.find((r) => r !== null) || null;
+                        } else {
+                          const response = await fetch(tokenURI, {
+                            cache: "no-store",
+                            signal: AbortSignal.timeout(5000),
+                          });
+                          if (response.ok) {
+                            metadata = await response.json();
+                          }
+                        }
+                      } catch (metaError) {
+                        // 메타데이터 조회 실패
+                      }
+                    }
 
                 // 이미지 URL 처리
                 let imageUrl = metadata?.image || "🎁";
@@ -367,38 +334,32 @@ export default function CollectionPage() {
                   console.log(`NFT #${tokenId} 판매 정보 조회 실패:`, err);
                 }
 
-                const nftData = {
-                  id: Number(tokenId), // 실제 tokenId
-                  tokenId: Number(tokenId), // 실제 tokenId 저장
-                  name: metadata?.name || `춘심이네 NFT #${tokenId}`,
-                  collection: "춘심이네 NFT Collection",
-                  image: imageUrl,
-                  category: metadata?.category || "art",
-                  description: metadata?.description || "춘심이네 NFT",
-                  price: isListed ? `${listingPrice} SBMB` : "미등록",
-                  creator: "춘심이네",
-                  isListed: isListed,
-                };
+                    const nftData = {
+                      id: Number(tokenId),
+                      tokenId: Number(tokenId),
+                      name: metadata?.name || `춘심이네 NFT #${tokenId}`,
+                      collection: "춘심이네 NFT Collection",
+                      image: imageUrl,
+                      category: metadata?.category || "art",
+                      description: metadata?.description || "춘심이네 NFT",
+                      price: isListed ? `${listingPrice} SBMB` : "미등록",
+                      creator: "춘심이네",
+                      isListed: isListed,
+                    };
 
-                ownedNFTs.push(nftData);
-                console.log(`✅ NFT #${tokenId} 생성 완료:`, nftData);
-                console.log(`📊 현재 ownedNFTs 배열 길이: ${ownedNFTs.length}`);
-                console.log(
-                  `🖼️ NFT #${tokenId} 이미지 URL 확인:`,
-                  nftData.image
-                );
-              } catch (error) {
-                console.log(`NFT #${i} 조회 실패:`, error);
-              }
+                    return nftData;
+                  } catch (error) {
+                    return null;
+                  }
+                })()
+              );
             }
 
-            // 실제 소유한 NFT가 있으면 로컬 스토리지 로직 건너뛰기
-            console.log(
-              `🎉 최종 결과: ${ownedNFTs.length}개의 NFT를 찾았습니다!`
-            );
-            console.log("📋 최종 소유한 NFT 목록:", ownedNFTs);
+            // 모든 NFT 병렬 조회 완료 대기
+            const nftResults = await Promise.all(nftPromises);
+            const ownedNFTs = nftResults.filter((nft) => nft !== null);
+
             setNfts(ownedNFTs);
-            console.log("✅ NFT 데이터 설정 완료");
             return;
           } else {
             console.log("⚠️ 실제 소유한 NFT가 없습니다.");
