@@ -17,17 +17,33 @@ export default function MintSuccessPage() {
     const tokenId = searchParams.get("tokenId");
     const txHash = searchParams.get("txHash");
     const contractAddress = searchParams.get("contractAddress");
+    const nftName = searchParams.get("nftName");
+    const nftDescription = searchParams.get("nftDescription");
+    const nftImage = searchParams.get("nftImage");
+    const category = searchParams.get("category");
     const gasFee = searchParams.get("gasFee");
     const blockNumber = searchParams.get("blockNumber");
     const confirmations = searchParams.get("confirmations");
     const mintedAt = searchParams.get("mintedAt");
 
+    // 카테고리별 기본 이미지
+    const categoryIcons = {
+      art: "🎨",
+      utility: "🔧",
+      activity: "🏃",
+    };
+
     if (tokenId && txHash) {
       setNftData({
         tokenId,
-        name: `춘심이네 NFT #${tokenId}`,
+        name: nftName || `춘심이네 NFT #${tokenId}`,
         collection: "춘심이네 NFT Collection",
-        image: "🎨", // 기본 이미지
+        image:
+          nftImage ||
+          categoryIcons[category as keyof typeof categoryIcons] ||
+          "🎨",
+        description: nftDescription || "",
+        category: category || "art",
         creator: "춘심이네",
       });
 

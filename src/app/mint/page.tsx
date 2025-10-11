@@ -1028,14 +1028,17 @@ export default function MintPage() {
         localStorage.getItem("lazyMintMetadata")
       );
 
-      // 성공 페이지로 리다이렉트 (트랜잭션 정보 포함)
+      // 성공 페이지로 리다이렉트 (NFT 정보 포함)
       const successUrl = new URL("/mint-success", window.location.origin);
       successUrl.searchParams.set("tokenId", "1"); // 새로 민팅된 NFT의 tokenId
       successUrl.searchParams.set("txHash", result?.transactionHash || "");
-      successUrl.searchParams.set(
-        "contractAddress",
-        "0x950C48726a06517762252409b63F4B6fFE44A585"
-      );
+      successUrl.searchParams.set("contractAddress", NFT_CONTRACT_ADDRESS);
+      successUrl.searchParams.set("nftName", nftName); // NFT 이름 전달
+      successUrl.searchParams.set("nftDescription", description); // 설명 전달
+      successUrl.searchParams.set("category", selectedCategory); // 카테고리 전달
+      if (uploadedImageUrl) {
+        successUrl.searchParams.set("nftImage", uploadedImageUrl); // 이미지 URL 전달
+      }
       successUrl.searchParams.set("gasFee", "0.008 SBMB");
       successUrl.searchParams.set("blockNumber", "#18,543,892");
       successUrl.searchParams.set("confirmations", "12 confirmations");

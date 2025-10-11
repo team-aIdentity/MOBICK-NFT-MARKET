@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>스토리지 초기화</title>
+    <style>
+      body {
+        font-family: system-ui, -apple-system, sans-serif;
+        max-width: 600px;
+        margin: 50px auto;
+        padding: 20px;
+        background: #f5f5f5;
+      }
+      .container {
+        background: white;
+        padding: 30px;
+        border-radius: 10px;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+      }
+      h1 {
+        color: #333;
+        margin-bottom: 20px;
+      }
+      button {
+        background: #ef4444;
+        color: white;
+        border: none;
+        padding: 12px 24px;
+        border-radius: 6px;
+        cursor: pointer;
+        font-size: 16px;
+        margin: 10px 5px;
+      }
+      button:hover {
+        background: #dc2626;
+      }
+      .success {
+        background: #10b981;
+        padding: 15px;
+        border-radius: 6px;
+        color: white;
+        margin-top: 20px;
+        display: none;
+      }
+      .info {
+        background: #f0f9ff;
+        border: 1px solid #0ea5e9;
+        padding: 15px;
+        border-radius: 6px;
+        margin-bottom: 20px;
+        color: #0c4a6e;
+      }
+      .warning {
+        background: #fef3c7;
+        border: 1px solid #f59e0b;
+        padding: 15px;
+        border-radius: 6px;
+        margin-bottom: 20px;
+        color: #92400e;
+      }
+      pre {
+        background: #1f2937;
+        color: #f3f4f6;
+        padding: 15px;
+        border-radius: 6px;
+        overflow-x: auto;
+        font-size: 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h1>🗑️ NFT 마켓플레이스 데이터 초기화</h1>
+
+      <div class="warning">
+        <strong>⚠️ 경고:</strong> 이 작업은 되돌릴 수 없습니다. 모든 로컬
+        데이터가 삭제됩니다.
+      </div>
+
+      <div class="info">
+        <strong>삭제될 데이터:</strong>
+        <ul>
+          <li>모든 판매 리스팅 정보 (listing_*)</li>
+          <li>LazyMint 메타데이터</li>
+          <li>기타 NFT 관련 캐시</li>
+        </ul>
+      </div>
+
+      <h3>현재 저장된 데이터:</h3>
+      <pre id="currentData">로딩 중...</pre>
+
+      <button onclick="clearAllData()">🗑️ 모든 데이터 삭제</button>
+      <button onclick="clearListingsOnly()">📝 판매 리스팅만 삭제</button>
+      <button onclick="location.href='/'">← 홈으로 돌아가기</button>
+
+      <div class="success" id="successMessage">
+        ✅ 데이터가 성공적으로 삭제되었습니다!
+      </div>
+    </div>
+
+    <script>
+      // 현재 저장된 데이터 표시
+      function displayCurrentData() {
+        const data = {};
+        for (let i = 0; i < localStorage.length; i++) {
+          const key = localStorage.key(i);
+          data[key] = localStorage.getItem(key);
+        }
+        document.getElementById("currentData").textContent =
+          Object.keys(data).length > 0
+            ? JSON.stringify(data, null, 2)
+            : "저장된 데이터가 없습니다.";
+      }
+
+      // 모든 데이터 삭제
+      function clearAllData() {
+        if (confirm("정말로 모든 데이터를 삭제하시겠습니까?")) {
+          localStorage.clear();
+          sessionStorage.clear();
+          document.getElementById("successMessage").style.display = "block";
+          displayCurrentData();
+
+          setTimeout(() => {
+            location.href = "/";
+          }, 2000);
+        }
+      }
+
+      // 판매 리스팅만 삭제
+      function clearListingsOnly() {
+        if (confirm("판매 리스팅 데이터만 삭제하시겠습니까?")) {
+          const keysToRemove = [];
+          for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i);
+            if (key.startsWith("listing_")) {
+              keysToRemove.push(key);
+            }
+          }
+
+          keysToRemove.forEach((key) => localStorage.removeItem(key));
+          localStorage.removeItem("lazyMintMetadata");
+
+          document.getElementById("successMessage").style.display = "block";
+          displayCurrentData();
+
+          setTimeout(() => {
+            location.href = "/";
+          }, 2000);
+        }
+      }
+
+      // 페이지 로드 시 데이터 표시
+      displayCurrentData();
+    </script>
+  </body>
+</html>
