@@ -357,12 +357,24 @@ export default function SellPage() {
         transactionHash: result.transactionHash,
       });
 
+      // 로컬스토리지에 판매 정보 저장
+      const listingKey = `listing_${nft.id}`;
+      const listingData = {
+        tokenId: nft.id,
+        price: listingPrice,
+        duration: listingDuration,
+        timestamp: Date.now(),
+        transactionHash: result.transactionHash,
+      };
+      localStorage.setItem(listingKey, JSON.stringify(listingData));
+      console.log("💾 판매 정보 저장 완료:", listingKey, listingData);
+
       alert(
-        `🎉 NFT가 성공적으로 판매 리스팅되었습니다!\n\nNFT ID: ${nft.id}\n가격: ${listingPrice} SBMB\nTx: ${result.transactionHash}\n\n홈 화면에서 확인하세요!`
+        `🎉 NFT가 성공적으로 판매 리스팅되었습니다!\n\nNFT ID: ${nft.id}\n가격: ${listingPrice} SBMB\nTx: ${result.transactionHash}\n\nMy Collection에서 확인하세요!`
       );
 
-      // 홈 페이지로 이동하여 판매 중인 NFT 확인
-      window.location.href = "/";
+      // My Collection 페이지로 이동
+      window.location.href = "/collection";
     } catch (error) {
       console.error("리스팅 실패:", error);
       alert(

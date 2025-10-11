@@ -57,7 +57,6 @@ export default function NFTGrid() {
       name: string;
       collection: string;
       price: string;
-      usdPrice: string;
       image: string;
       creator: string;
       category: string;
@@ -95,64 +94,53 @@ export default function NFTGrid() {
           address: NFT_CONTRACT_ADDRESS,
         });
 
-        // Marketplace에서 전체 리스팅 개수 확인
-        let totalListings = 0;
+        // NFT 총 발행 개수 확인
+        let totalNFTs = 0;
         try {
-          const totalListingsResult = await readContract({
-            contract: marketplaceContract,
-            method: "function totalListings() view returns (uint256)",
+          const totalSupplyResult = await readContract({
+            contract: nftContract,
+            method: "function totalSupply() view returns (uint256)",
             params: [],
           });
-          totalListings = parseInt(totalListingsResult.toString());
-          console.log("전체 리스팅 개수:", totalListings);
+          totalNFTs = parseInt(totalSupplyResult.toString());
         } catch (error) {
-          console.log("totalListings 조회 실패, 기본값 사용:", error);
-          totalListings = 100; // 기본값으로 100개까지 확인
+          console.log("totalSupply 조회 실패:", error);
+          totalNFTs = 10;
         }
 
-        // 각 리스팅을 개별적으로 확인 (최대 100개까지)
-        const maxListings = Math.min(totalListings, 100);
+        // 최대 20개까지만 표시
+        const maxListings = Math.min(totalNFTs, 20);
 
+        // 로컬스토리지에서 판매 중인 NFT만 조회
         for (let listingId = 0; listingId < maxListings; listingId++) {
-          let tokenId = 0; // catch 블록에서도 접근 가능하도록 선언
+          let tokenId = listingId + 1;
           try {
-            // Marketplace에서 리스팅 정보 확인
-            const listingResult = await readContract({
-              contract: marketplaceContract,
-              method:
-                "function getListing(uint256 _listingId) view returns (tuple(address assetContract, uint256 tokenId, address lister, uint256 quantity, address currency, uint256 pricePerToken, uint256 startTimestamp, uint256 endTimestamp, bool isReservedListing, uint256 reservedBuyer, uint256 status))",
-              params: [BigInt(listingId)],
-            });
+            // 로컬스토리지에서 판매 정보 확인
+            const listingKey = `listing_${tokenId}`;
+            const storedListing = localStorage.getItem(listingKey);
 
-            if (!listingResult || listingResult.length === 0) {
-              console.log(`⏭️ Listing #${listingId} 없음 - 건너뛰기`);
+            if (!storedListing) {
+              continue; // 판매 중이 아니면 건너뛰기
+            }
+
+            const listing = JSON.parse(storedListing);
+            const listingPrice = listing.price;
+
+            // NFT가 실제로 존재하는지 확인
+            try {
+              await readContract({
+                contract: nftContract,
+                method:
+                  "function ownerOf(uint256 tokenId) view returns (address)",
+                params: [BigInt(tokenId)],
+              });
+            } catch {
+              // NFT가 존재하지 않으면 로컬스토리지에서 제거
+              localStorage.removeItem(listingKey);
               continue;
             }
 
-            const assetContract = listingResult[0];
-            tokenId = parseInt(listingResult[1].toString()); // 스코프 외부 변수에 할당
-            const status = listingResult[10]; // status 필드
-
-            // NFT 컨트랙트가 일치하지 않으면 건너뛰기
-            if (
-              assetContract.toLowerCase() !== NFT_CONTRACT_ADDRESS.toLowerCase()
-            ) {
-              console.log(`⏭️ Listing #${listingId} 다른 컨트랙트 - 건너뛰기`);
-              continue;
-            }
-
-            // Active 상태가 아니면 건너뛰기
-            if (status.toString() !== "1") {
-              console.log(`⏭️ Listing #${listingId} 비활성 상태 - 건너뛰기`);
-              continue;
-            }
-
-            const listingPrice = listingResult[5].toString(); // pricePerToken
-            console.log(
-              `✅ Listing #${listingId} - NFT #${tokenId} 리스팅됨 - 가격: ${listingPrice}`
-            );
-
-            const i = tokenId; // 이미 parseInt로 변환됨
+            const i = tokenId;
 
             const tokenURIResult = await readContract({
               contract: nftContract,
@@ -160,51 +148,62 @@ export default function NFTGrid() {
                 "function tokenURI(uint256 tokenId) view returns (string)",
               params: [BigInt(i)],
             });
-            console.log(`NFT #${i} TokenURI:`, tokenURIResult);
 
             let metadata = null;
             let fetchSuccess = false;
 
+            console.log(`🔍 NFT #${i} tokenURI:`, tokenURIResult);
+
             if (tokenURIResult && tokenURIResult.trim() !== "") {
-              // URL 준비
               let urlsToTry = [];
 
               if (tokenURIResult.startsWith("ipfs://")) {
                 const ipfsHash = tokenURIResult.replace("ipfs://", "");
                 urlsToTry = [
+                  `https://gateway.pinata.cloud/ipfs/${ipfsHash}?pinataGatewayToken=UHWXvO0yfhuWgUiWlPTtdQKSA7Bp1lRpAAXAcYzZ__PuxBCvtJ2W7Brth4Q6V8UI`,
                   `https://gateway.pinata.cloud/ipfs/${ipfsHash}`,
                   `https://cloudflare-ipfs.com/ipfs/${ipfsHash}`,
-                  `https://dweb.link/ipfs/${ipfsHash}`,
-                  `https://ipfs.io/ipfs/${ipfsHash}`,
                 ];
               } else {
                 urlsToTry = [tokenURIResult];
               }
 
-              console.log(`NFT #${i} 시도할 URL들:`, urlsToTry);
-
-              // 각 URL을 순차적으로 시도
               for (const url of urlsToTry) {
-                console.log(`NFT #${i} URL 시도:`, url);
-                const result = await safeFetch(url, 10000);
-
+                console.log(`📡 NFT #${i} 메타데이터 시도:`, url);
+                const result = await safeFetch(url, 10000); // 타임아웃 10초로 증가
                 if (result.success) {
                   metadata = result.data;
                   fetchSuccess = true;
-                  console.log(`NFT #${i} 메타데이터 성공 (${url}):`, metadata);
+                  console.log(`✅ NFT #${i} 메타데이터 성공:`, metadata);
+                  console.log(`📝 NFT #${i} 이름:`, metadata?.name);
                   break;
                 } else {
-                  console.log(`NFT #${i} URL 실패 (${url}):`, result.error);
+                  console.log(`❌ NFT #${i} 메타데이터 실패:`, result.error);
                 }
               }
+            }
 
-              if (!fetchSuccess) {
-                console.warn(`NFT #${i} 모든 URL 시도 실패`);
+            // 메타데이터 조회 실패 시 재시도 (한 번 더)
+            if (
+              !fetchSuccess &&
+              tokenURIResult &&
+              tokenURIResult.startsWith("ipfs://")
+            ) {
+              console.log(`🔄 NFT #${i} 메타데이터 재시도...`);
+              const ipfsHash = tokenURIResult.replace("ipfs://", "");
+              const retryUrl = `https://ipfs.io/ipfs/${ipfsHash}`;
+              console.log(`📡 NFT #${i} 재시도 URL:`, retryUrl);
+              const retryResult = await safeFetch(retryUrl, 15000);
+              if (retryResult.success) {
+                metadata = retryResult.data;
+                fetchSuccess = true;
+                console.log(`✅ NFT #${i} 재시도 성공:`, metadata);
+                console.log(`📝 NFT #${i} 이름:`, metadata?.name);
               }
-            } else {
-              console.warn(
-                `NFT #${i}의 TokenURI가 비어있거나 유효하지 않습니다.`
-              );
+            }
+
+            if (!fetchSuccess) {
+              console.log(`⚠️ NFT #${i} 메타데이터 조회 실패 - 기본 이름 사용`);
             }
 
             // 메타데이터 가져오기 실패 시에도 기본 정보로 NFT 표시
@@ -218,14 +217,18 @@ export default function NFTGrid() {
                   ? metadata.name
                   : `춘심이네 NFT #${i}`,
               collection: "춘심이네 NFT Collection",
-              price: `${(parseInt(listingPrice) / 1e18).toFixed(0)} SBMB`, // Marketplace 가격 사용
-              usdPrice: "$1.70",
+              price: `${listingPrice} SBMB`,
               image:
                 metadata &&
                 typeof metadata === "object" &&
                 "image" in metadata &&
                 typeof metadata.image === "string"
-                  ? metadata.image
+                  ? metadata.image.startsWith("ipfs://")
+                    ? `https://gateway.pinata.cloud/ipfs/${metadata.image.replace(
+                        "ipfs://",
+                        ""
+                      )}?pinataGatewayToken=UHWXvO0yfhuWgUiWlPTtdQKSA7Bp1lRpAAXAcYzZ__PuxBCvtJ2W7Brth4Q6V8UI`
+                    : metadata.image
                   : "🎨",
               creator: "춘심이네",
               category: "아트",
@@ -243,31 +246,11 @@ export default function NFTGrid() {
           }
         }
 
+        console.log("✅ 조회된 NFT 개수:", formattedNFTs.length);
         setNfts(formattedNFTs);
-        console.log("포맷된 NFT들:", formattedNFTs);
       } catch (error) {
         console.error("NFT 가져오기 실패:", error);
-
-        // 에러 시 기본 데이터 사용
-        const defaultNfts = [
-          {
-            id: 1,
-            name: "춘심이네 NFT #1",
-            collection: "춘심이네 NFT Collection",
-            price: "100 SBMB",
-            usdPrice: "$1.70",
-            image: "🎨",
-            creator: "춘심이네",
-            category: "아트",
-            categoryColor: "bg-green-500",
-            tokenId: 1,
-            tokenURI: "",
-            metadata: null,
-            fetchSuccess: false,
-          },
-        ];
-
-        setNfts(defaultNfts);
+        setNfts([]); // 에러 시 빈 배열
       } finally {
         setIsLoading(false);
       }
@@ -437,7 +420,6 @@ export default function NFTGrid() {
                       <p className="text-lg font-bold text-gray-900">
                         {nft.price}
                       </p>
-                      <p className="text-sm text-gray-500">{nft.usdPrice}</p>
                     </div>
                   </div>
 

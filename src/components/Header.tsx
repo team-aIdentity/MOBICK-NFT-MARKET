@@ -76,11 +76,14 @@ export default function Header() {
     readDecimals();
   }, []);
 
-  // SBMB 토큰 잔액 가져오기
+  // SBMB 토큰 잔액 가져오기 (최적화)
   useEffect(() => {
-    const fetchSBMBBalance = async () => {
-      if (!address) return;
+    if (!address) {
+      setSbmbBalance("0.000");
+      return;
+    }
 
+    const fetchSBMBBalance = async () => {
       try {
         const tokenContract = getContract({
           client: client,
@@ -108,6 +111,10 @@ export default function Header() {
     };
 
     fetchSBMBBalance();
+
+    // 5초마다 갱신
+    const interval = setInterval(fetchSBMBBalance, 5000);
+    return () => clearInterval(interval);
   }, [address, tokenDecimals]);
 
   return (

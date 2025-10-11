@@ -351,6 +351,22 @@ export default function CollectionPage() {
 
                 console.log(`🖼️ NFT #${tokenId} 최종 이미지 URL: ${imageUrl}`);
 
+                // Marketplace에서 판매 정보 확인
+                let listingPrice = "0";
+                let isListed = false;
+                try {
+                  // 로컬스토리지에서 판매 정보 확인
+                  const listingKey = `listing_${tokenId}`;
+                  const storedListing = localStorage.getItem(listingKey);
+                  if (storedListing) {
+                    const listing = JSON.parse(storedListing);
+                    listingPrice = listing.price;
+                    isListed = true;
+                  }
+                } catch (err) {
+                  console.log(`NFT #${tokenId} 판매 정보 조회 실패:`, err);
+                }
+
                 const nftData = {
                   id: Number(tokenId), // 실제 tokenId
                   tokenId: Number(tokenId), // 실제 tokenId 저장
@@ -359,8 +375,9 @@ export default function CollectionPage() {
                   image: imageUrl,
                   category: metadata?.category || "art",
                   description: metadata?.description || "춘심이네 NFT",
-                  price: metadata?.price || "0",
+                  price: isListed ? `${listingPrice} SBMB` : "미등록",
                   creator: "춘심이네",
+                  isListed: isListed,
                 };
 
                 ownedNFTs.push(nftData);
@@ -654,9 +671,16 @@ export default function CollectionPage() {
                 </div>
                 <div className="p-6">
                   <div className="flex items-center justify-between mb-2">
-                    <h3 className="text-lg font-semibold text-gray-900 truncate">
-                      {nft.name}
-                    </h3>
+                    <div className="flex-1">
+                      <h3 className="text-lg font-semibold text-gray-900 truncate">
+                        {nft.name}
+                      </h3>
+                      {nft.isListed && (
+                        <span className="inline-block mt-1 px-2 py-1 bg-green-100 text-green-700 text-xs font-semibold rounded-full">
+                          판매 중
+                        </span>
+                      )}
+                    </div>
                     <div className="relative">
                       <button
                         onClick={(e) => {
