@@ -19,13 +19,7 @@ const safeFetch = async (
 
     const response = await fetch(url, {
       method: "GET",
-      headers: {
-        Accept: "application/json, */*",
-        "Cache-Control": "no-cache",
-        Pragma: "no-cache",
-      },
       signal: controller.signal,
-      cache: "no-store",
     });
 
     clearTimeout(timeoutId);
@@ -160,9 +154,10 @@ export default function NFTGrid() {
               if (tokenURIResult.startsWith("ipfs://")) {
                 const ipfsHash = tokenURIResult.replace("ipfs://", "");
                 urlsToTry = [
-                  `https://gateway.pinata.cloud/ipfs/${ipfsHash}?pinataGatewayToken=UHWXvO0yfhuWgUiWlPTtdQKSA7Bp1lRpAAXAcYzZ__PuxBCvtJ2W7Brth4Q6V8UI`,
-                  `https://gateway.pinata.cloud/ipfs/${ipfsHash}`,
-                  `https://cloudflare-ipfs.com/ipfs/${ipfsHash}`,
+                  `https://ipfs.io/ipfs/${ipfsHash}`, // thirdweb 기본
+                  `https://${ipfsHash}.ipfs.nftstorage.link`, // NFT Storage
+                  `https://cloudflare-ipfs.com/ipfs/${ipfsHash}`, // Cloudflare
+                  `https://gray-famous-lemming-869.mypinata.cloud/ipfs/${ipfsHash}`, // Pinata 커스텀
                 ];
               } else {
                 urlsToTry = [tokenURIResult];
@@ -208,7 +203,7 @@ export default function NFTGrid() {
 
             // 메타데이터 가져오기 실패 시에도 기본 정보로 NFT 표시
             formattedNFTs.push({
-              id: i,
+              id: i, // tokenId와 동일
               name:
                 metadata &&
                 typeof metadata === "object" &&
@@ -224,10 +219,10 @@ export default function NFTGrid() {
                 "image" in metadata &&
                 typeof metadata.image === "string"
                   ? metadata.image.startsWith("ipfs://")
-                    ? `https://gateway.pinata.cloud/ipfs/${metadata.image.replace(
+                    ? `https://ipfs.io/ipfs/${metadata.image.replace(
                         "ipfs://",
                         ""
-                      )}?pinataGatewayToken=UHWXvO0yfhuWgUiWlPTtdQKSA7Bp1lRpAAXAcYzZ__PuxBCvtJ2W7Brth4Q6V8UI`
+                      )}`
                     : metadata.image
                   : "🎨",
               creator: "춘심이네",
@@ -247,6 +242,7 @@ export default function NFTGrid() {
         }
 
         console.log("✅ 조회된 NFT 개수:", formattedNFTs.length);
+        console.log("📋 NFT 데이터:", formattedNFTs);
         setNfts(formattedNFTs);
       } catch (error) {
         console.error("NFT 가져오기 실패:", error);
@@ -387,10 +383,37 @@ export default function NFTGrid() {
                 key={nft.id}
                 href={`/nft/${nft.id}`}
                 className="bg-white rounded-xl shadow-lg overflow-hidden hover:shadow-xl transition-shadow duration-300 border border-gray-100 block"
+                onClick={() => {
+                  console.log("🔗 NFT 클릭:", nft.id, `/nft/${nft.id}`);
+                }}
               >
                 {/* NFT 이미지 */}
-                <div className="relative aspect-square bg-gradient-to-br from-teal-400 to-teal-600 flex items-center justify-center">
-                  <div className="text-6xl">{nft.image}</div>
+                <div className="relative aspect-square bg-gray-100 flex items-center justify-center overflow-hidden">
+                  {nft.image &&
+                  (nft.image.startsWith("http://") ||
+                    nft.image.startsWith("https://")) ? (
+                    <img
+                      src={nft.image}
+                      alt={nft.name}
+                      className="w-full h-full object-cover"
+                      onError={(e) => {
+                        console.error(
+                          "🖼️ NFTGrid 이미지 로드 실패:",
+                          nft.image
+                        );
+                        e.currentTarget.style.display = "none";
+                        if (e.currentTarget.parentElement) {
+                          e.currentTarget.parentElement.innerHTML =
+                            '<span class="text-6xl">🎨</span>';
+                        }
+                      }}
+                      onLoad={() => {
+                        console.log("✅ NFTGrid 이미지 로드 성공:", nft.image);
+                      }}
+                    />
+                  ) : (
+                    <span className="text-6xl">{nft.image || "🎨"}</span>
+                  )}
                   {/* 카테고리 태그 */}
                   <div
                     className={`absolute top-3 right-3 px-2 py-1 rounded-full text-white text-xs font-medium ${nft.categoryColor}`}

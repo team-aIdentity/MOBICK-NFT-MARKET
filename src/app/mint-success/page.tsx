@@ -103,8 +103,29 @@ export default function MintSuccessPage() {
             {/* NFT 정보 */}
             <div className="flex gap-6 mb-8">
               {/* NFT 이미지 */}
-              <div className="w-32 h-32 bg-gradient-to-br from-teal-400 to-teal-600 rounded-xl flex items-center justify-center">
-                <span className="text-4xl">{nftData?.image || "🎨"}</span>
+              <div className="w-32 h-32 bg-gray-100 rounded-xl flex items-center justify-center overflow-hidden">
+                {nftData?.image &&
+                (nftData.image.startsWith("http://") ||
+                  nftData.image.startsWith("https://")) ? (
+                  <img
+                    src={nftData.image}
+                    alt={nftData?.name || "NFT"}
+                    className="w-full h-full object-cover"
+                    onError={(e) => {
+                      console.error("🖼️ 이미지 로드 실패:", nftData.image);
+                      e.currentTarget.style.display = "none";
+                      if (e.currentTarget.parentElement) {
+                        e.currentTarget.parentElement.innerHTML =
+                          '<span class="text-4xl">🎨</span>';
+                      }
+                    }}
+                    onLoad={() => {
+                      console.log("✅ 이미지 로드 성공:", nftData.image);
+                    }}
+                  />
+                ) : (
+                  <span className="text-4xl">{nftData?.image || "🎨"}</span>
+                )}
               </div>
 
               {/* NFT 기본 정보 */}

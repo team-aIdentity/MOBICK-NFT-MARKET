@@ -23,7 +23,14 @@ export default function MyNFTDetailPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isTransferring, setIsTransferring] = useState(false);
 
-  // 안전한 fetch 함수
+  // URL에서 컨트랙트 주소 가져오기 (없으면 기본값 사용)
+  const contractAddress =
+    typeof window !== "undefined"
+      ? new URLSearchParams(window.location.search).get("contract") ||
+        NFT_CONTRACT_ADDRESS
+      : NFT_CONTRACT_ADDRESS;
+
+  // 안전한 fetch 함수 (CORS 문제 해결)
   const safeFetch = async (
     url: string,
     timeout = 10000
@@ -34,13 +41,7 @@ export default function MyNFTDetailPage() {
 
       const response = await fetch(url, {
         method: "GET",
-        headers: {
-          Accept: "application/json, */*",
-          "Cache-Control": "no-cache",
-          Pragma: "no-cache",
-        },
         signal: controller.signal,
-        cache: "no-store",
       });
 
       clearTimeout(timeoutId);
@@ -69,15 +70,18 @@ export default function MyNFTDetailPage() {
     const fetchNFT = async () => {
       try {
         setIsLoading(true);
-        console.log("🔍 My NFT 상세 페이지 - NFT 조회 시작:", {
-          nftId,
-          contractAddress: NFT_CONTRACT_ADDRESS,
-        });
+        console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        console.log("🔍 My NFT 상세 페이지 - NFT 조회 시작");
+        console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        console.log("📋 NFT ID (URL에서):", nftId);
+        console.log("📝 Contract Address:", contractAddress);
+        console.log("👤 현재 계정:", account?.address);
+        console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
 
         const nftContract = getContract({
           client: client,
           chain: baseSepolia,
-          address: NFT_CONTRACT_ADDRESS,
+          address: contractAddress,
         });
 
         // 먼저 NFT 소유권 확인
@@ -104,7 +108,9 @@ export default function MyNFTDetailPage() {
           params: [BigInt(nftId)],
         });
 
-        console.log("🔍 NFT tokenURI:", tokenURIResult);
+        console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        console.log("📦 TokenURI 조회 완료:", tokenURIResult);
+        console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
 
         let metadata = null;
         let fetchSuccess = false;
@@ -114,46 +120,96 @@ export default function MyNFTDetailPage() {
 
           if (tokenURIResult.startsWith("ipfs://")) {
             const ipfsHash = tokenURIResult.replace("ipfs://", "");
+            console.log("📝 IPFS 해시:", ipfsHash);
             urlsToTry = [
-              `https://gateway.pinata.cloud/ipfs/${ipfsHash}?pinataGatewayToken=UHWXvO0yfhuWgUiWlPTtdQKSA7Bp1lRpAAXAcYzZ__PuxBCvtJ2W7Brth4Q6V8UI`,
-              `https://gateway.pinata.cloud/ipfs/${ipfsHash}`,
-              `https://cloudflare-ipfs.com/ipfs/${ipfsHash}`,
-              `https://dweb.link/ipfs/${ipfsHash}`,
-              `https://ipfs.io/ipfs/${ipfsHash}`,
+              `https://ipfs.io/ipfs/${ipfsHash}`, // thirdweb 기본
+              `https://${ipfsHash}.ipfs.nftstorage.link`, // NFT Storage
+              `https://gray-famous-lemming-869.mypinata.cloud/ipfs/${ipfsHash}`, // Pinata 커스텀
+              `https://gateway.pinata.cloud/ipfs/${ipfsHash}`, // Pinata 공식
+              `https://cloudflare-ipfs.com/ipfs/${ipfsHash}`, // Cloudflare
             ];
           } else {
             urlsToTry = [tokenURIResult];
           }
 
-          for (const url of urlsToTry) {
+          console.log(
+            "🔄 메타데이터 로딩 시도 중... (총 " +
+              urlsToTry.length +
+              "개 게이트웨이)"
+          );
+
+          for (let i = 0; i < urlsToTry.length; i++) {
+            const url = urlsToTry[i];
+            console.log(`📝 ${i + 1}/${urlsToTry.length} 시도: ${url}`);
+
             const result = await safeFetch(url, 10000);
             if (result.success) {
               metadata = result.data;
               fetchSuccess = true;
+              console.log(`✅ ${i + 1}/${urlsToTry.length} 성공!`);
+              console.log("📦 로드된 메타데이터:", metadata);
               break;
+            } else {
+              console.log(
+                `❌ ${i + 1}/${urlsToTry.length} 실패:`,
+                result.error
+              );
             }
           }
+
+          if (!fetchSuccess) {
+            console.log("❌ 모든 게이트웨이에서 메타데이터 로드 실패");
+          }
+        } else {
+          console.log("⚠️ TokenURI가 비어있습니다");
         }
 
-        // 이미지 URL 처리
+        // 이미지 URL 처리 (다중 게이트웨이)
         let imageUrl = "🎨";
-        if (metadata?.image && metadata.image.startsWith("ipfs://")) {
-          const ipfsHash = metadata.image.replace("ipfs://", "");
-          imageUrl = `https://gateway.pinata.cloud/ipfs/${ipfsHash}?pinataGatewayToken=UHWXvO0yfhuWgUiWlPTtdQKSA7Bp1lRpAAXAcYzZ__PuxBCvtJ2W7Brth4Q6V8UI`;
-        } else if (metadata?.image && metadata.image.startsWith("http")) {
-          imageUrl = metadata.image;
+        if (metadata?.image) {
+          console.log("🖼️ 메타데이터 이미지:", metadata.image);
+
+          if (metadata.image.startsWith("ipfs://")) {
+            const ipfsHash = metadata.image.replace("ipfs://", "");
+            // thirdweb 기본 게이트웨이 우선
+            imageUrl = `https://ipfs.io/ipfs/${ipfsHash}`;
+            console.log("🖼️ IPFS 이미지 변환:", imageUrl);
+          } else if (
+            metadata.image.startsWith("http://") ||
+            metadata.image.startsWith("https://")
+          ) {
+            imageUrl = metadata.image;
+            console.log("🖼️ HTTP 이미지 사용:", imageUrl);
+          } else {
+            imageUrl = metadata.image; // 이모지 등
+            console.log("🖼️ 기타 이미지 사용:", imageUrl);
+          }
+        } else {
+          console.log("⚠️ 메타데이터에 이미지 없음, 기본값 사용");
         }
+
+        console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        console.log("📦 최종 NFT 데이터 구성:");
+        console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        console.log("📝 Name:", metadata?.name || `NFT #${nftId}`);
+        console.log(
+          "📝 Description:",
+          metadata?.description || "No description"
+        );
+        console.log("🖼️ Image URL:", imageUrl);
+        console.log("📋 Category:", metadata?.category || "art");
+        console.log("✅ 메타데이터 로드 성공:", fetchSuccess);
+        console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
 
         const formattedNFT = {
           id: nftId,
-          name: metadata?.name || `춘심이네 NFT #${nftId}`,
-          collection: "춘심이네 NFT Collection",
-          description:
-            metadata?.description || "춘심이네에서 발행한 특별한 NFT입니다.",
+          name: metadata?.name || `NFT #${nftId}`,
+          collection: metadata?.collection || "NFT Collection",
+          description: metadata?.description || "No description available",
           image: imageUrl,
-          category: metadata?.category || "아트",
-          creator: "춘심이네",
-          contractAddress: NFT_CONTRACT_ADDRESS,
+          category: metadata?.category || "art",
+          creator: metadata?.creator || owner,
+          contractAddress: contractAddress,
           tokenId: nftId.toString(),
           tokenStandard: "ERC-721",
           tokenURI: tokenURIResult,
@@ -161,6 +217,7 @@ export default function MyNFTDetailPage() {
           fetchSuccess: fetchSuccess,
         };
 
+        console.log("📦 최종 formattedNFT:", formattedNFT);
         setNft(formattedNFT);
       } catch (error) {
         console.error("NFT 가져오기 실패:", error);
@@ -327,7 +384,7 @@ export default function MyNFTDetailPage() {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-16 mb-20">
           {/* Left Panel - NFT Image */}
           <div className="space-y-6">
-            <div className="relative aspect-square bg-gradient-to-br from-teal-400 via-teal-500 to-teal-600 rounded-2xl flex items-center justify-center shadow-2xl overflow-hidden">
+            <div className="relative aspect-square bg-gray-100 rounded-2xl flex items-center justify-center shadow-2xl overflow-hidden">
               {nft.image && nft.image.startsWith("http") ? (
                 <img
                   src={nft.image}

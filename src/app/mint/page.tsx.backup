@@ -8,6 +8,9 @@ import {
   sendTransaction,
   readContract,
 } from "thirdweb";
+import { mintTo } from "thirdweb/extensions/erc721";
+import { lazyMint } from "thirdweb/extensions/erc721";
+import { claim } from "thirdweb/extensions/erc721";
 
 // Pinata API 설정
 const PINATA_API_KEY = "06b4e668dbf10a60fdf1";
@@ -117,8 +120,10 @@ import { baseSepolia } from "thirdweb/chains";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
 import { client, connectInjectedMetamask } from "@/lib/wallet";
-import { NFT_CONTRACT_ADDRESS } from "@/lib/thirdweb";
-import { useRouter } from "next/navigation";
+import {
+  NFT_CONTRACT_ADDRESS,
+  ALTERNATIVE_NFT_CONTRACT_ADDRESS,
+} from "@/lib/thirdweb";
 
 const categories = [
   { value: "", label: "Select category", disabled: true },
@@ -135,7 +140,6 @@ const collections = [
 export default function MintPage() {
   const account = useActiveAccount();
   const activeWallet = useActiveWallet();
-  const router = useRouter();
   const [connectedAddress, setConnectedAddress] = useState<string | null>(null);
   const [currentChainId, setCurrentChainId] = useState<number | null>(null);
   const [isMinting, setIsMinting] = useState(false);
@@ -495,30 +499,17 @@ export default function MintPage() {
         ],
       };
 
-      console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-      console.log("📦 메타데이터 생성 완료:");
-      console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-      console.log("📝 Name:", metadata.name);
-      console.log("📝 Description:", metadata.description);
-      console.log("📝 Category:", metadata.category);
-      console.log("🖼️ Image URL:", imageUrl);
-      console.log("📋 Image URL 타입:", typeof imageUrl);
-      console.log("🔗 Image URL 시작:", imageUrl?.substring(0, 50));
-      console.log("📦 전체 메타데이터:", JSON.stringify(metadata, null, 2));
-      console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+      console.log("📦 사용자 입력 메타데이터:", metadata);
+      console.log("🖼️ 최종 이미지 URL:", imageUrl);
+      console.log("📋 이미지 URL 타입:", typeof imageUrl);
+      console.log("🔗 이미지 URL 시작:", imageUrl?.substring(0, 20));
 
       // 3단계: 메타데이터를 Pinata IPFS에 업로드
       console.log("📤 2단계: 메타데이터를 Pinata IPFS에 업로드 중...");
       let tokenURI: string;
       try {
         tokenURI = await uploadMetadataToPinata(metadata);
-        console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-        console.log("✅ 메타데이터 업로드 성공!");
-        console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-        console.log("🔗 TokenURI:", tokenURI);
-        console.log("📦 업로드된 메타데이터:", metadata);
-        console.log("🖼️ 메타데이터 내 이미지:", metadata.image);
-        console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        console.log("✅ 메타데이터 업로드 성공:", tokenURI);
       } catch (metadataError) {
         console.log(
           "❌ 메타데이터 업로드 실패, Base64 방식 사용:",
@@ -605,20 +596,20 @@ export default function MintPage() {
       try {
         // 1. 컨트랙트가 일시 정지 상태인지 확인
         try {
-        const isPaused = await readContract({
-          contract: nftContract,
-          method: "function paused() view returns (bool)",
-          params: [],
-        });
+          const isPaused = await readContract({
+            contract: nftContract,
+            method: "function paused() view returns (bool)",
+            params: [],
+          });
           contractDiagnostics.paused = isPaused;
-        console.log("📋 컨트랙트 일시 정지 상태:", isPaused);
+          console.log("📋 컨트랙트 일시 정지 상태:", isPaused);
 
-        if (isPaused) {
-          alert(
+          if (isPaused) {
+            alert(
               "❌ 컨트랙트가 일시 정지 상태입니다.\n\n민팅이 비활성화되어 있습니다."
-          );
-          setIsMinting(false);
-          return;
+            );
+            setIsMinting(false);
+            return;
           }
         } catch (pausedError) {
           console.log("⚠️ paused() 함수가 없거나 확인 불가:", pausedError);
@@ -627,15 +618,15 @@ export default function MintPage() {
 
         // 2. 컨트랙트 소유자 확인
         try {
-        const owner = await readContract({
-          contract: nftContract,
-          method: "function owner() view returns (address)",
-          params: [],
-        });
+          const owner = await readContract({
+            contract: nftContract,
+            method: "function owner() view returns (address)",
+            params: [],
+          });
           contractDiagnostics.owner = owner;
           contractDiagnostics.isOwner =
             owner.toLowerCase() === connectedAddress.toLowerCase();
-        console.log("📋 컨트랙트 소유자:", owner);
+          console.log("📋 컨트랙트 소유자:", owner);
           console.log(
             "📋 현재 사용자가 소유자인가:",
             contractDiagnostics.isOwner
@@ -663,13 +654,13 @@ export default function MintPage() {
 
         // 4. 공급량 확인
         try {
-        const maxSupply = await readContract({
-          contract: nftContract,
-          method: "function maxSupply() view returns (uint256)",
-          params: [],
-        });
+          const maxSupply = await readContract({
+            contract: nftContract,
+            method: "function maxSupply() view returns (uint256)",
+            params: [],
+          });
           contractDiagnostics.maxSupply = maxSupply.toString();
-        console.log("📋 최대 공급량:", maxSupply.toString());
+          console.log("📋 최대 공급량:", maxSupply.toString());
         } catch (maxSupplyError) {
           console.log(
             "⚠️ maxSupply() 함수가 없거나 확인 불가:",
@@ -679,13 +670,13 @@ export default function MintPage() {
         }
 
         try {
-        const totalSupply = await readContract({
-          contract: nftContract,
-          method: "function totalSupply() view returns (uint256)",
-          params: [],
-        });
+          const totalSupply = await readContract({
+            contract: nftContract,
+            method: "function totalSupply() view returns (uint256)",
+            params: [],
+          });
           contractDiagnostics.totalSupply = totalSupply.toString();
-        console.log("📋 현재 공급량:", totalSupply.toString());
+          console.log("📋 현재 공급량:", totalSupply.toString());
 
           if (contractDiagnostics.maxSupply !== "unlimited") {
             contractDiagnostics.isMaxSupplyReached =
@@ -694,9 +685,9 @@ export default function MintPage() {
               alert(
                 "❌ 최대 공급량에 도달했습니다.\n\n더 이상 민팅할 수 없습니다."
               );
-          setIsMinting(false);
-          return;
-        }
+              setIsMinting(false);
+              return;
+            }
           }
         } catch (totalSupplyError) {
           console.log(
@@ -742,86 +733,96 @@ export default function MintPage() {
         description: formData.description,
         category: formData.category,
         imageUrl: imageUrl,
-        imageType: imageUrl.startsWith("ipfs://")
-          ? "IPFS"
-          : imageUrl.startsWith("http")
-          ? "HTTP"
-          : "Emoji",
+        imageType: imageUrl.startsWith("ipfs://") ? "IPFS" : imageUrl.startsWith("http") ? "HTTP" : "Emoji",
       });
 
       let result;
       let mintSuccess = false;
       const quantity = parseInt(formData.quantity) || 1;
 
-      // NFT Collection 민팅 (Pinata 업로드 후 직접 mintTo 호출)
+      // NFT Collection용 mintTo 확장 함수 사용
       try {
-        console.log(`📝 NFT Collection 민팅 시작 (${quantity}개)`);
+        console.log(`📝 NFT Collection mintTo 시도 중... (${quantity}개 민팅)`);
+
+        // 메타데이터 준비
+        const nftMetadata = {
+          name: formData.name,
+          description: formData.description,
+          image: imageUrl, // IPFS URL 또는 HTTP URL
+          attributes: [
+            {
+              trait_type: "Category",
+              value: formData.category,
+            },
+            {
+              trait_type: "Price",
+              value: `${formData.price} SBMB`,
+            },
+          ],
+        };
+
+        console.log("📦 NFT 메타데이터:", nftMetadata);
 
         for (let i = 0; i < quantity; i++) {
           console.log(`📝 ${i + 1}/${quantity}번째 NFT 민팅 중...`);
 
-          // 직접 prepareContractCall 사용 (tokenURI 전달)
-                      const mintToTransaction = prepareContractCall({
-                        contract: nftContract,
-                        method:
-              "function mintTo(address to, string memory uri) returns (uint256)",
-                        params: [connectedAddress, tokenURI],
-                      });
+          // thirdweb v5의 mintTo 확장 함수 사용
+          const mintToTransaction = mintTo({
+            contract: nftContract,
+            to: connectedAddress,
+            nft: nftMetadata,
+          });
 
-                      result = await sendTransaction({
-                        transaction: mintToTransaction,
-                        account,
-                      });
+          result = await sendTransaction({
+            transaction: mintToTransaction,
+            account,
+          });
 
-                        console.log(
+          console.log(
             `✅ ${i + 1}/${quantity}번째 NFT 민팅 성공! Transaction hash:`,
-                          result.transactionHash
-                        );
-          console.log(`📦 TokenURI: ${tokenURI}`);
+            result.transactionHash
+          );
         }
 
         console.log(`🎉 총 ${quantity}개의 NFT 민팅 완료!`);
-                          mintSuccess = true;
+        mintSuccess = true;
       } catch (mintToError) {
         console.error("❌ 민팅 실패:", mintToError);
-
+        
         let errorMessage = "알 수 없는 오류";
         let detailedMessage = "";
-
+        
         if (mintToError instanceof Error) {
           errorMessage = mintToError.message;
-
+          
           // 에러 타입별 상세 메시지
           if (mintToError.message.includes("execution reverted")) {
-            detailedMessage =
-              "\n\n💡 'execution reverted' 에러:\n" +
+            detailedMessage = "\n\n💡 'execution reverted' 에러:\n" +
               "• 컨트랙트가 일시정지 상태\n" +
               "• 민팅 권한이 없음 (소유자 또는 민터 역할 필요)\n" +
               "• 최대 공급량 초과\n" +
               "• 컨트랙트 타입이 NFT Drop (lazyMint + claim 필요)";
           } else if (mintToError.message.includes("insufficient funds")) {
-            detailedMessage =
-              "\n\n💡 가스비 부족입니다. Base Sepolia ETH를 충전해주세요.";
+            detailedMessage = "\n\n💡 가스비 부족입니다. Base Sepolia ETH를 충전해주세요.";
           } else if (mintToError.message.includes("user rejected")) {
             detailedMessage = "\n\n💡 사용자가 트랜잭션을 거부했습니다.";
           } else if (mintToError.message.includes("network")) {
-            detailedMessage =
-              "\n\n💡 네트워크 연결 문제입니다. Base Sepolia로 전환해주세요.";
+            detailedMessage = "\n\n💡 네트워크 연결 문제입니다. Base Sepolia로 전환해주세요.";
           }
         }
-
-                    alert(
+        
+        alert(
           `❌ 민팅 실패!\n\n` +
-            `에러: ${errorMessage}${detailedMessage}\n\n` +
-            `해결 방법:\n` +
-            `1. 컨트랙트가 NFT Collection 타입인지 확인\n` +
-            `2. thirdweb 대시보드에서 권한 확인\n` +
-            `3. Base Sepolia 네트워크 연결 확인\n` +
-            `4. 가스비 충분히 확보`
+          `에러: ${errorMessage}${detailedMessage}\n\n` +
+          `해결 방법:\n` +
+          `1. 컨트랙트가 NFT Collection 타입인지 확인\n` +
+          `2. thirdweb 대시보드에서 권한 확인\n` +
+          `3. Base Sepolia 네트워크 연결 확인\n` +
+          `4. 가스비 충분히 확보`
         );
-
-                    setIsMinting(false);
-                    return;
+        
+        setIsMinting(false);
+        return;
       }
 
       // 민팅 성공 처리
@@ -849,6 +850,251 @@ export default function MintPage() {
       successUrl.searchParams.set("nftDescription", formData.description); // 설명 전달
       successUrl.searchParams.set("category", formData.category); // 카테고리 전달
 
+          console.log("✅ lazyMint 성공! TX:", lazyMintResult.transactionHash);
+
+          // 2. claim으로 실제 민팅
+          console.log("📤 2단계: claim으로 NFT 민팅...");
+          const claimTransaction = claim({
+            contract: nftContract,
+            to: connectedAddress,
+            quantity: BigInt(quantity),
+          });
+
+          result = await sendTransaction({
+            transaction: claimTransaction,
+            account,
+          });
+
+          console.log("✅ claim 성공! TX:", result.transactionHash);
+          console.log(`🎉 총 ${quantity}개의 NFT 민팅 완료!`);
+          mintSuccess = true;
+        } catch (lazyMintError) {
+          console.log("❌ 방법 2 실패 (lazyMint + claim):", lazyMintError);
+          console.log("❌ 에러 상세:", {
+            message:
+              lazyMintError instanceof Error
+                ? lazyMintError.message
+                : String(lazyMintError),
+          });
+
+          // 대안 2: 직접 mintTo 함수 호출 (가장 기본적인 방법)
+          try {
+            console.log("📝 방법 3: 직접 mintTo 함수 호출...");
+            console.log("📋 파라미터:", {
+              to: connectedAddress,
+              uri: tokenURI,
+            });
+
+            for (let i = 0; i < quantity; i++) {
+              console.log(`📝 ${i + 1}/${quantity}번째 NFT 민팅 중...`);
+
+              const mintToTransaction = prepareContractCall({
+                contract: nftContract,
+                method:
+                  "function mintTo(address to, string memory uri) returns (uint256)",
+                params: [connectedAddress, tokenURI],
+              });
+
+              result = await sendTransaction({
+                transaction: mintToTransaction,
+                account,
+              });
+
+              console.log(
+                `✅ ${i + 1}/${quantity}번째 NFT 민팅 성공! Transaction hash:`,
+                result.transactionHash
+              );
+            }
+
+            console.log(`🎉 총 ${quantity}개의 NFT 민팅 완료!`);
+            mintSuccess = true;
+          } catch (directMintToError) {
+            console.log("❌ 방법 3 실패:", directMintToError);
+            console.log("❌ 에러 상세:", {
+              message:
+                directMintToError instanceof Error
+                  ? directMintToError.message
+                  : String(directMintToError),
+            });
+
+            // 대안 3: safeMint 시도
+            try {
+              console.log("📝 방법 4: safeMint 시도...");
+
+              for (let i = 0; i < quantity; i++) {
+                console.log(`📝 ${i + 1}/${quantity}번째 NFT 민팅 중...`);
+
+                const safeMintTransaction = prepareContractCall({
+                  contract: nftContract,
+                  method: "function safeMint(address to, string memory uri)",
+                  params: [connectedAddress, tokenURI],
+                });
+
+                result = await sendTransaction({
+                  transaction: safeMintTransaction,
+                  account,
+                });
+
+                console.log(
+                  `✅ ${
+                    i + 1
+                  }/${quantity}번째 NFT 민팅 성공! Transaction hash:`,
+                  result.transactionHash
+                );
+              }
+
+              console.log(`🎉 총 ${quantity}개의 NFT 민팅 완료!`);
+              mintSuccess = true;
+            } catch (safeMintError) {
+              console.log("❌ 방법 4 실패:", safeMintError);
+
+              // 대안 4: mintWithSignature (서명 기반 민팅)
+              try {
+                console.log("📝 방법 5: mintWithSignature 시도...");
+
+                const mintWithSignatureTransaction = prepareContractCall({
+                  contract: nftContract,
+                  method:
+                    "function mintWithSignature((address to, string uri, uint256 price, address currency, uint128 validityStartTimestamp, uint128 validityEndTimestamp, bytes32 uid) req, bytes signature)",
+                  params: [
+                    {
+                      to: connectedAddress,
+                      uri: tokenURI,
+                      price: BigInt(0),
+                      currency: "0x0000000000000000000000000000000000000000",
+                      validityStartTimestamp: BigInt(
+                        Math.floor(Date.now() / 1000)
+                      ),
+                      validityEndTimestamp: BigInt(
+                        Math.floor(Date.now() / 1000) + 3600
+                      ),
+                      uid: "0x" + "0".repeat(64),
+                    },
+                    "0x" + "0".repeat(130), // 빈 서명
+                  ],
+                });
+
+                result = await sendTransaction({
+                  transaction: mintWithSignatureTransaction,
+                  account,
+                });
+
+                console.log(
+                  "✅ mintWithSignature 성공! TX:",
+                  result.transactionHash
+                );
+                mintSuccess = true;
+              } catch (signatureError) {
+                console.log("❌ 방법 5 실패:", signatureError);
+
+                // 최종 대안: mint (URI 없이, 가장 단순한 형태)
+                try {
+                  console.log("📝 방법 6: mint (URI 없이, 가장 단순) 시도...");
+
+                  for (let i = 0; i < quantity; i++) {
+                    console.log(`📝 ${i + 1}/${quantity}번째 NFT 민팅 중...`);
+
+                    const mintTransaction = prepareContractCall({
+                      contract: nftContract,
+                      method: "function mint(address to, uint256 amount)",
+                      params: [connectedAddress, BigInt(1)],
+                    });
+
+                    result = await sendTransaction({
+                      transaction: mintTransaction,
+                      account,
+                    });
+
+                    console.log(
+                      `✅ ${
+                        i + 1
+                      }/${quantity}번째 NFT 민팅 성공! Transaction hash:`,
+                      result.transactionHash
+                    );
+                  }
+
+                  console.log(`🎉 총 ${quantity}개의 NFT 민팅 완료!`);
+                  mintSuccess = true;
+                } catch (mintError) {
+                  console.log("❌ 방법 6 실패:", mintError);
+
+                  // 최종 에러 처리
+                  console.log("❌ 모든 민팅 방법 실패");
+                  console.log("📊 시도한 방법들:");
+                  console.log("1. thirdweb v5 mintTo (nft 객체)");
+                  console.log("2. lazyMint + claim (NFT Drop)");
+                  console.log("3. mintTo(address, string)");
+                  console.log("4. safeMint(address, string)");
+                  console.log("5. mintWithSignature");
+                  console.log("6. mint(address, uint256)");
+
+                  throw new Error(
+                    `6가지 민팅 방법 모두 실패했습니다:\n\n` +
+                      `1. thirdweb v5 mintTo (nft 객체)\n` +
+                      `2. lazyMint + claim (NFT Drop 전용)\n` +
+                      `3. mintTo(address to, string uri)\n` +
+                      `4. safeMint(address to, string uri)\n` +
+                      `5. mintWithSignature\n` +
+                      `6. mint(address to, uint256 amount)\n\n` +
+                      `마지막 에러: ${
+                        mintError instanceof Error
+                          ? mintError.message
+                          : String(mintError)
+                      }\n\n` +
+                      `💡 가능한 원인:\n` +
+                      `• 컨트랙트 타입이 예상과 다름\n` +
+                      `• 민팅 함수 시그니처가 다름\n` +
+                      `• 컨트랙트 내부 로직에서 거부\n` +
+                      `• 가스 부족 또는 네트워크 문제\n\n` +
+                      `🔧 해결 방법:\n` +
+                      `1. thirdweb 대시보드에서 컨트랙트 타입 확인\n` +
+                      `2. "Explorer" 탭에서 사용 가능한 함수 확인\n` +
+                      `3. 다른 컨트랙트로 재배포 고려\n` +
+                      `4. Base Sepolia ETH 잔액 확인`
+                  );
+                }
+              }
+            }
+          }
+        }
+      }
+
+      if (!mintSuccess) {
+        console.error("❌ 모든 민팅 방법 실패");
+        alert(
+          "❌ 민팅 실패!\n\n" +
+            "모든 민팅 방법이 실패했습니다.\n\n" +
+            "가능한 원인:\n" +
+            "• 컨트랙트가 일시정지 상태\n" +
+            "• 민팅 권한이 없음 (소유자 또는 민터 역할 필요)\n" +
+            "• 최대 공급량 초과\n" +
+            "• 네트워크 문제\n" +
+            "• 컨트랙트 함수 시그니처 불일치\n\n" +
+            "해결 방법:\n" +
+            "1. thirdweb 대시보드에서 컨트랙트 권한 확인\n" +
+            "2. 현재 계정을 민터로 추가\n" +
+            "3. 컨트랙트 소유자 계정으로 민팅 시도\n" +
+            "4. Base Sepolia 네트워크 연결 확인"
+        );
+        setIsMinting(false);
+        return;
+      }
+
+      console.log("✅ 민팅 성공!");
+      // 민팅 성공 시 로컬 스토리지 정리
+      console.log("🧹 민팅 성공! 로컬 스토리지 정리 중...");
+      localStorage.removeItem("lazyMintMetadata");
+      console.log("✅ 로컬 스토리지 정리 완료");
+
+      console.log("✅ 민팅 완료! Transaction hash:", result.transactionHash);
+      console.log("📦 저장된 메타데이터:", lazyMintData);
+
+      // 성공 페이지로 리다이렉트 (NFT 정보 포함)
+      const successUrl = new URL("/mint-success", window.location.origin);
+      successUrl.searchParams.set("tokenId", "1"); // 새로 민팅된 NFT의 tokenId
+      successUrl.searchParams.set("txHash", result?.transactionHash || "");
+      successUrl.searchParams.set("contractAddress", NFT_CONTRACT_ADDRESS);
+      successUrl.searchParams.set("nftName", formData.name); // NFT 이름 전달
       successUrl.searchParams.set("nftDescription", formData.description); // 설명 전달
       successUrl.searchParams.set("category", formData.category); // 카테고리 전달
 
@@ -888,7 +1134,7 @@ export default function MintPage() {
         new Date().toLocaleString("ko-KR")
       );
 
-      router.push(successUrl.toString());
+      window.location.href = successUrl.toString();
 
       // 성공 페이지로 이동 완료
     } catch (error) {

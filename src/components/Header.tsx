@@ -13,8 +13,10 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import { client } from "@/lib/wallet";
 
-// SBMB 토큰 주소 (베이스 세폴리아)
-const SBMB_TOKEN_ADDRESS = "0x25C2F65Efe4624Cb1c009A4c0FD8540515Dbe71B";
+// SBMB 토큰 주소 (환경변수에서 가져오기)
+const SBMB_TOKEN_ADDRESS =
+  process.env.NEXT_PUBLIC_ERC20_ADDRESS ||
+  "0xFD422282408204B877bc4a56b3265d4f7b6d94D1";
 
 export default function Header() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);

@@ -15,6 +15,12 @@ import Link from "next/link";
 import { client } from "@/lib/wallet";
 import { NFT_CONTRACT_ADDRESS } from "@/lib/thirdweb";
 
+// 여러 NFT 컨트랙트 주소들 (현재는 기본 컨트랙트만 사용)
+const NFT_CONTRACT_ADDRESSES = [
+  NFT_CONTRACT_ADDRESS, // 기본 컨트랙트 0x8C9ecbA1e2540d4733c19b8e2F6d213a7248592a
+  // 다른 컨트랙트 주소를 추가하려면 여기에 추가하세요
+];
+
 export default function CollectionPage() {
   const account = useActiveAccount();
   const [connectedAddress, setConnectedAddress] = useState<string | null>(null);
@@ -132,230 +138,286 @@ export default function CollectionPage() {
       try {
         setIsLoading(true);
 
+        // 로컬 스토리지 더미 데이터 정리
+        const storedMetadata = localStorage.getItem("lazyMintMetadata");
+        if (storedMetadata) {
+          console.log("🧹 로컬 스토리지 더미 데이터 발견, 정리 중...");
+          localStorage.removeItem("lazyMintMetadata");
+          console.log("✅ 로컬 스토리지 더미 데이터 정리 완료");
+        }
+
+        // 카테고리 아이콘 매핑
+        const categoryIcons = {
+          art: "🎨",
+          utility: "🔧",
+          activity: "🏃",
+        };
+
+        // 모든 컨트랙트에서 NFT 조회
+        console.log(
+          "🔍 여러 컨트랙트에서 NFT 조회 시작:",
+          NFT_CONTRACT_ADDRESSES
+        );
+        console.log("🔍 연결된 지갑:", connectedAddress);
+
+        const allOwnedNFTs = [];
+
+        // 각 컨트랙트별로 NFT 조회
+        for (const contractAddress of NFT_CONTRACT_ADDRESSES) {
+          try {
+            console.log(`\n📋 컨트랙트 조회 중: ${contractAddress}`);
+            console.log(`🔍 연결된 지갑 주소: ${connectedAddress}`);
+            console.log(`🔍 체인: ${baseSepolia.name} (${baseSepolia.id})`);
+
         const nftContract = getContract({
           client,
           chain: baseSepolia,
-          address: NFT_CONTRACT_ADDRESS,
+              address: contractAddress,
         });
 
-        // NFT Drop - lazyMint된 NFT 조회
-        try {
-          console.log("🔍 컨트랙트 주소:", NFT_CONTRACT_ADDRESS);
-          console.log("🔍 연결된 지갑:", connectedAddress);
-
           // 1. 전체 발행된 NFT 개수 확인 (totalSupply)
+            console.log(
+              `📊 컨트랙트 ${contractAddress} totalSupply 조회 중...`
+            );
           const totalSupply = await readContract({
             contract: nftContract,
             method: "function totalSupply() view returns (uint256)",
             params: [],
           });
+            console.log(`📊 totalSupply 결과: ${totalSupply.toString()}`);
 
           // 2. 실제 소유한 NFT 개수 확인 (balanceOf)
+            console.log(`📊 컨트랙트 ${contractAddress} balanceOf 조회 중...`);
           const balance = await readContract({
             contract: nftContract,
-            method: "function balanceOf(address owner) view returns (uint256)",
+              method:
+                "function balanceOf(address owner) view returns (uint256)",
             params: [connectedAddress],
           });
-
-          console.log("📊 NFT Collection 상태:", {
-            totalSupply: totalSupply.toString(),
-            balance: balance.toString(),
-            totalMinted: Number(totalSupply),
-            owned: Number(balance),
-            connectedAddress: connectedAddress,
-            contractAddress: NFT_CONTRACT_ADDRESS,
-          });
-
-          // 디버깅: 컨트랙트 상태 확인
-          try {
-            const contractOwner = await readContract({
-              contract: nftContract,
-              method: "function owner() view returns (address)",
-              params: [],
-            });
-            console.log("📋 컨트랙트 소유자:", contractOwner);
-          } catch (ownerError) {
-            console.log("📋 컨트랙트 소유자 조회 실패:", ownerError);
-          }
+            console.log(`📊 balanceOf 결과: ${balance.toString()}`);
 
           const totalMinted = Number(totalSupply);
           const ownedCount = Number(balance);
-          const ownedNFTs = [];
 
-          console.log(
-            `📦 전체 발행된 NFT: ${totalMinted}개, 실제 소유: ${ownedCount}개`
-          );
-
-          // 로컬 스토리지 상태도 확인
-          const localMetadata = localStorage.getItem("lazyMintMetadata");
-          console.log("📦 로컬 스토리지 상태:", {
-            hasMetadata: !!localMetadata,
-            metadata: localMetadata ? JSON.parse(localMetadata) : null,
-          });
-
-          // 로컬 스토리지에서 최신 메타데이터 조회 (실제 소유한 NFT가 없을 때만 사용)
-          const storedMetadata = localStorage.getItem("lazyMintMetadata");
-
-          // 카테고리 아이콘 매핑
-          const categoryIcons = {
-            art: "🎨",
-            utility: "🔧",
-            activity: "🏃",
-          };
+            console.log(`📊 컨트랙트 ${contractAddress} 상태:`, {
+              totalSupply: totalSupply.toString(),
+              balance: balance.toString(),
+              totalMinted,
+              owned: ownedCount,
+            });
 
           // 실제 소유한 NFT가 있는 경우
           if (ownedCount > 0) {
-            console.log(`✅ 실제 소유한 NFT: ${ownedCount}개`);
-            console.log(`📋 컨트랙트 주소: ${NFT_CONTRACT_ADDRESS}`);
-            console.log(`📋 연결된 주소: ${connectedAddress}`);
+              console.log(
+                `✅ 컨트랙트 ${contractAddress}에서 ${ownedCount}개 NFT 발견`
+              );
 
-            // 실제 소유한 NFT가 있으면 로컬 스토리지 정리 (claim이 완료되었으므로)
-            localStorage.removeItem("lazyMintMetadata");
+              // 소유한 NFT의 tokenId 조회 및 데이터 구성 (Pinata 전용 + 병렬 처리)
             console.log(
-              "🧹 실제 소유한 NFT가 있으므로 로컬 스토리지 정리 완료"
-            );
+                `🔄 컨트랙트 ${contractAddress}에서 ${ownedCount}개의 NFT 조회 시작...`
+              );
 
-            // 소유한 NFT의 tokenId 조회 및 데이터 구성
-            console.log(`🔄 ${ownedCount}개의 NFT 조회 시작...`);
-            for (let i = 0; i < ownedCount; i++) {
-              try {
-                console.log(`📝 NFT #${i} 조회 중...`);
-                const tokenId = await readContract({
+              // 1단계: 모든 tokenId를 병렬로 조회
+              const tokenIdPromises = Array.from(
+                { length: ownedCount },
+                (_, i) =>
+                  readContract({
                   contract: nftContract,
                   method:
                     "function tokenOfOwnerByIndex(address owner, uint256 index) view returns (uint256)",
                   params: [connectedAddress, BigInt(i)],
-                });
+                  })
+              );
 
+              const tokenIds = await Promise.all(tokenIdPromises);
                 console.log(
-                  `✅ 소유한 NFT #${i}: tokenId = ${tokenId.toString()}`
-                );
+                `✅ 모든 tokenId 조회 완료:`,
+                tokenIds.map((id) => id.toString())
+              );
 
-                // tokenURI 조회
-                let tokenURI = "";
-                try {
-                  tokenURI = await readContract({
+              // 2단계: 모든 tokenURI를 병렬로 조회
+              const tokenURIPromises = tokenIds.map((tokenId) =>
+                readContract({
                     contract: nftContract,
                     method:
                       "function tokenURI(uint256 tokenId) view returns (string)",
                     params: [BigInt(Number(tokenId))],
+                }).catch((error) => {
+                  console.log(`📝 NFT #${tokenId} TokenURI 조회 실패:`, error);
+                  return "";
+                })
+              );
+
+              const tokenURIs = await Promise.all(tokenURIPromises);
+              console.log(`✅ 모든 tokenURI 조회 완료`);
+
+              // 3단계: 메타데이터 병렬 가져오기 (CORS 문제 해결)
+              const fetchWithTimeout = async (
+                url: string,
+                timeoutMs: number = 8000
+              ) => {
+                const controller = new AbortController();
+                const timeoutId = setTimeout(
+                  () => controller.abort(),
+                  timeoutMs
+                );
+
+                try {
+                  const response = await fetch(url, {
+                    signal: controller.signal,
                   });
-                  console.log(`📝 NFT #${tokenId} TokenURI:`, tokenURI);
-                } catch (uriError) {
+
+                  clearTimeout(timeoutId);
+
+                  if (!response.ok) {
+                    throw new Error(
+                      `HTTP ${response.status}: ${response.statusText}`
+                    );
+                  }
+
+                  return await response.json();
+                } catch (error) {
+                  clearTimeout(timeoutId);
+                  throw error;
+                }
+              };
+
+              const metadataPromises = tokenURIs.map(
+                async (tokenURI, index) => {
+                  const tokenId = tokenIds[index];
                   console.log(
-                    `📝 NFT #${tokenId} TokenURI 조회 실패:`,
-                    uriError
+                    `📝 NFT #${tokenId} 메타데이터 조회 시작, TokenURI: ${tokenURI}`
                   );
+
+                  if (!tokenURI) {
+                    console.log(`❌ NFT #${tokenId} TokenURI가 비어있음`);
+                    return null;
                 }
 
-                // 메타데이터 가져오기
-                let metadata = null;
-                if (tokenURI) {
                   try {
-                    // IPFS URL인 경우 여러 게이트웨이 시도
-                    let response;
                     if (tokenURI.startsWith("ipfs://")) {
                       const ipfsHash = tokenURI.replace("ipfs://", "");
+                      console.log(`📝 NFT #${tokenId} IPFS 해시: ${ipfsHash}`);
+
+                      // 여러 IPFS 게이트웨이 시도 (thirdweb 우선)
                       const gateways = [
-                        `https://gateway.pinata.cloud/ipfs/${ipfsHash}`,
-                        `https://gateway.pinata.cloud/ipfs/${ipfsHash}?pinataGatewayToken=UHWXvO0yfhuWgUiWlPTtdQKSA7Bp1lRpAAXAcYzZ__PuxBCvtJ2W7Brth4Q6V8UI`,
-                        `https://cloudflare-ipfs.com/ipfs/${ipfsHash}`,
-                        `https://dweb.link/ipfs/${ipfsHash}`,
-                        `https://ipfs.io/ipfs/${ipfsHash}`,
-                        `https://gateway.ipfs.io/ipfs/${ipfsHash}`,
+                        `https://ipfs.io/ipfs/${ipfsHash}`, // thirdweb 기본 게이트웨이
+                        `https://${ipfsHash}.ipfs.nftstorage.link`, // NFT Storage
+                        `https://gray-famous-lemming-869.mypinata.cloud/ipfs/${ipfsHash}`, // Pinata 커스텀
+                        `https://gateway.pinata.cloud/ipfs/${ipfsHash}`, // Pinata 공식
+                        `https://cloudflare-ipfs.com/ipfs/${ipfsHash}`, // Cloudflare
                       ];
 
-                      let success = false;
                       for (const gateway of gateways) {
                         try {
-                          console.log(
-                            `📝 NFT #${tokenId} IPFS 시도: ${gateway}`
-                          );
-                          response = await fetch(gateway, {
-                            cache: "no-store",
-                            headers: {
-                              Accept: "application/json",
-                            },
-                          });
-                          if (response.ok) {
-                            console.log(
-                              `✅ NFT #${tokenId} IPFS 성공: ${gateway}`
-                            );
-                            success = true;
-                            break;
-                          }
-                        } catch (gatewayError) {
-                          console.log(
-                            `❌ NFT #${tokenId} IPFS 실패: ${gateway}`,
-                            gatewayError
-                          );
+                          console.log(`📝 NFT #${tokenId} 시도: ${gateway}`);
+                          const metadata = await fetchWithTimeout(gateway);
+                          console.log(`✅ NFT #${tokenId} 성공: ${gateway}`);
+                          return metadata;
+                        } catch (error) {
+                          console.log(`❌ NFT #${tokenId} 실패: ${gateway}`);
+                          continue; // 다음 게이트웨이 시도
                         }
                       }
 
-                      if (!success) {
-                        throw new Error("모든 IPFS 게이트웨이 실패");
-                      }
+                      console.log(`❌ NFT #${tokenId} 모든 게이트웨이 실패`);
+                      return null;
                     } else {
                       // 일반 URL인 경우
-                      response = await fetch(tokenURI, {
-                        cache: "no-store",
-                      });
+                          console.log(
+                        `📝 NFT #${tokenId} 일반 URL 시도: ${tokenURI}`
+                      );
+                      try {
+                        const metadata = await fetchWithTimeout(tokenURI);
+                        console.log(`✅ NFT #${tokenId} 일반 URL 성공`);
+                        return metadata;
+                      } catch (urlError) {
+                            console.log(
+                          `❌ NFT #${tokenId} 일반 URL 실패:`,
+                          urlError
+                        );
+                        return null;
+                      }
                     }
-
-                    metadata = await response.json();
-                    console.log(`📝 NFT #${tokenId} 메타데이터:`, metadata);
                   } catch (metaError) {
-                    console.log(
-                      `📝 NFT #${tokenId} 메타데이터 가져오기 실패:`,
+                    console.error(
+                      `❌ NFT #${tokenId} 메타데이터 가져오기 실패:`,
                       metaError
                     );
+                    return null;
                   }
                 }
+              );
 
-                // 이미지 URL 처리
-                let imageUrl = metadata?.image || "🎁";
-                console.log(`🖼️ NFT #${tokenId} 원본 이미지:`, metadata?.image);
-                console.log(`🖼️ NFT #${tokenId} 메타데이터 전체:`, metadata);
+              const metadatas = await Promise.all(metadataPromises);
+              console.log(`✅ 모든 메타데이터 로드 완료`);
+              console.log(
+                `📊 메타데이터 결과:`,
+                metadatas.map((meta, i) => ({
+                  tokenId: tokenIds[i].toString(),
+                  hasMetadata: !!meta,
+                  metadata: meta,
+                }))
+              );
 
-                if (metadata?.image && metadata.image.startsWith("ipfs://")) {
+              // 4단계: NFT 데이터 구성 (개선된 메타데이터 처리)
+              const categoryIcons = {
+                art: "🎨",
+                utility: "🔧",
+                activity: "🏃",
+              };
+
+              for (let i = 0; i < ownedCount; i++) {
+                const tokenId = tokenIds[i];
+                const metadata = metadatas[i];
+
+                console.log(`🔄 NFT #${tokenId} 데이터 구성 시작...`);
+                    console.log(`📝 NFT #${tokenId} 메타데이터:`, metadata);
+
+                // 이미지 URL 처리 (다중 게이트웨이 지원)
+                let imageUrl = "🎁"; // 기본값
+
+                if (metadata?.image) {
+                    console.log(
+                    `🖼️ NFT #${tokenId} 메타데이터 이미지:`,
+                    metadata.image
+                  );
+
+                  if (metadata.image.startsWith("ipfs://")) {
                   const ipfsHash = metadata.image.replace("ipfs://", "");
-                  // Pinata 게이트웨이 + API 키 사용
-                  imageUrl = `https://gateway.pinata.cloud/ipfs/${ipfsHash}?pinataGatewayToken=UHWXvO0yfhuWgUiWlPTtdQKSA7Bp1lRpAAXAcYzZ__PuxBCvtJ2W7Brth4Q6V8UI`;
+                    // 여러 IPFS 게이트웨이 중 첫 번째 사용 (thirdweb 우선)
+                    imageUrl = `https://ipfs.io/ipfs/${ipfsHash}`;
                   console.log(
-                    `🖼️ NFT #${tokenId} IPFS 이미지 URL: ${imageUrl}`
+                      `🖼️ NFT #${tokenId} IPFS 이미지 (ipfs.io): ${imageUrl}`
                   );
                 } else if (
-                  metadata?.image &&
-                  !metadata.image.startsWith("ipfs://")
+                    metadata.image.startsWith("http://") ||
+                    metadata.image.startsWith("https://")
                 ) {
-                  // IPFS가 아닌 일반 URL인 경우
+                    // HTTP URL인 경우 그대로 사용
                   imageUrl = metadata.image;
-                  console.log(
-                    `🖼️ NFT #${tokenId} 일반 이미지 URL: ${imageUrl}`
-                  );
+                    console.log(`🖼️ NFT #${tokenId} HTTP 이미지: ${imageUrl}`);
                 } else {
-                  // 이미지가 없는 경우 카테고리 아이콘 사용
-                  const categoryIcons = {
-                    art: "🎨",
-                    utility: "🔧",
-                    activity: "🏃",
-                  };
+                    // 상대 경로나 기타 형식인 경우
+                    imageUrl = metadata.image;
+                    console.log(`🖼️ NFT #${tokenId} 기타 이미지: ${imageUrl}`);
+                  }
+                } else {
+                  // 메타데이터에 이미지가 없는 경우 카테고리 아이콘 사용
+                  console.log(`⚠️ NFT #${tokenId} 메타데이터에 이미지 없음`);
                   imageUrl =
                     categoryIcons[
                       metadata?.category as keyof typeof categoryIcons
                     ] || "🎁";
                   console.log(
-                    `🖼️ NFT #${tokenId} 카테고리 아이콘: ${imageUrl}`
+                    `🖼️ NFT #${tokenId} 카테고리 아이콘 사용: ${imageUrl}`
                   );
                 }
 
-                console.log(`🖼️ NFT #${tokenId} 최종 이미지 URL: ${imageUrl}`);
-
-                // Marketplace에서 판매 정보 확인
+                // Marketplace 판매 정보 확인
                 let listingPrice = "0";
                 let isListed = false;
                 try {
-                  // 로컬스토리지에서 판매 정보 확인
                   const listingKey = `listing_${tokenId}`;
                   const storedListing = localStorage.getItem(listingKey);
                   if (storedListing) {
@@ -368,116 +430,74 @@ export default function CollectionPage() {
                 }
 
                 const nftData = {
-                  id: Number(tokenId), // 실제 tokenId
-                  tokenId: Number(tokenId), // 실제 tokenId 저장
-                  name: metadata?.name || `춘심이네 NFT #${tokenId}`,
-                  collection: "춘심이네 NFT Collection",
+                  id: Number(tokenId),
+                  tokenId: Number(tokenId),
+                  name: metadata?.name || `NFT #${tokenId}`,
+                  collection: `NFT Collection (${contractAddress.slice(
+                    0,
+                    6
+                  )}...)`,
                   image: imageUrl,
                   category: metadata?.category || "art",
-                  description: metadata?.description || "춘심이네 NFT",
+                  description: metadata?.description || "NFT",
                   price: isListed ? `${listingPrice} SBMB` : "미등록",
-                  creator: "춘심이네",
+                  creator: "Creator",
                   isListed: isListed,
+                  contractAddress: contractAddress, // 컨트랙트 주소 추가
                 };
 
-                ownedNFTs.push(nftData);
-                console.log(`✅ NFT #${tokenId} 생성 완료:`, nftData);
-                console.log(`📊 현재 ownedNFTs 배열 길이: ${ownedNFTs.length}`);
+                console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
                 console.log(
-                  `🖼️ NFT #${tokenId} 이미지 URL 확인:`,
-                  nftData.image
+                  `✅ 컨트랙트 ${contractAddress.slice(
+                    0,
+                    6
+                  )}... NFT #${tokenId} 데이터 구성 완료!`
                 );
-              } catch (error) {
-                console.log(`NFT #${i} 조회 실패:`, error);
+                console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+                console.log("📋 NFT ID:", nftData.id);
+                console.log("📋 Token ID:", nftData.tokenId);
+                console.log("📝 Name:", nftData.name);
+                console.log("📝 Description:", nftData.description);
+                console.log("🖼️ Image:", nftData.image);
+                console.log("📦 전체 데이터:", nftData);
+                console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+                allOwnedNFTs.push(nftData);
               }
-            }
 
-            // 실제 소유한 NFT가 있으면 로컬 스토리지 로직 건너뛰기
             console.log(
-              `🎉 최종 결과: ${ownedNFTs.length}개의 NFT를 찾았습니다!`
+                `🎉 컨트랙트 ${contractAddress}에서 ${ownedCount}개 NFT 조회 완료`
             );
-            console.log("📋 최종 소유한 NFT 목록:", ownedNFTs);
-            setNfts(ownedNFTs);
-            console.log("✅ NFT 데이터 설정 완료");
-            return;
           } else {
-            console.log("⚠️ 실제 소유한 NFT가 없습니다.");
-            console.log(`📋 컨트랙트 주소: ${NFT_CONTRACT_ADDRESS}`);
-            console.log(`📋 연결된 주소: ${connectedAddress}`);
-            console.log(
-              `📋 totalSupply: ${totalMinted}, balance: ${ownedCount}`
-            );
-
-            // 로컬 스토리지에 데이터가 있으면 표시 (아직 claim되지 않은 상태)
-            if (storedMetadata) {
-              console.log(
-                "📦 로컬 스토리지에 민팅 데이터가 있습니다:",
-                storedMetadata
-              );
-              console.log(
-                "⚠️ 로컬 스토리지에 데이터가 남아있습니다. claim이 완료되지 않았을 수 있습니다."
-              );
-              console.log("🔍 실제 소유한 NFT가 있는지 다시 확인 중...");
-
-              // 실제 소유한 NFT가 있다면 로컬 스토리지 무시
-              if (ownedCount > 0) {
-                console.log(
-                  "✅ 실제 소유한 NFT가 있습니다. 로컬 스토리지 무시하고 실제 NFT만 표시합니다."
-                );
-                // 로컬 스토리지 정리 (claim이 완료되었으므로)
-                localStorage.removeItem("lazyMintMetadata");
-                console.log("🧹 로컬 스토리지 정리 완료");
-                return; // 로컬 스토리지 데이터 무시
-              }
-              try {
-                const metadata = JSON.parse(storedMetadata);
-                const categoryIcons = {
-                  art: "🎨",
-                  utility: "🔧",
-                  activity: "🏃",
-                };
-
-                const tempNFT = {
-                  id: 0,
-                  tokenId: 0, // lazyMint된 NFT는 아직 claim되지 않음
-                  name: metadata?.name || "민팅된 NFT (Claim 필요)",
-                  collection: "춘심이네 NFT Collection",
-                  image:
-                    metadata?.image ||
-                    categoryIcons[metadata?.category] ||
-                    "🎁",
-                  category: metadata?.category || "art",
-                  description: metadata?.description || "Claim이 필요한 NFT",
-                  price: metadata?.price || "0",
-                  creator: "춘심이네",
-                  needsClaim: true, // claim이 필요한 NFT 표시
-                };
-
-                console.log("🖼️ lazyMint NFT 이미지 설정:", {
-                  metadataImage: metadata?.image,
-                  category: metadata?.category,
-                  categoryIcon: categoryIcons[metadata?.category],
-                  finalImage: tempNFT.image,
-                });
-
-                ownedNFTs.push(tempNFT);
-                console.log("📦 lazyMint NFT 표시:", tempNFT);
-              } catch (e) {
-                console.log("로컬 스토리지 파싱 실패:", e);
-              }
-            } else {
-              console.log(
-                "✅ 로컬 스토리지가 비어있습니다. claim이 완료되었거나 아직 민팅하지 않았습니다."
-              );
+              console.log(`⚠️ 컨트랙트 ${contractAddress}에서 소유한 NFT 없음`);
             }
+          } catch (contractError) {
+            console.error(
+              `❌ 컨트랙트 ${contractAddress} 조회 실패:`,
+              contractError
+            );
+            console.error(`❌ 에러 상세:`, {
+              message:
+                contractError instanceof Error
+                  ? contractError.message
+                  : "Unknown error",
+              stack:
+                contractError instanceof Error
+                  ? contractError.stack
+                  : undefined,
+              contractAddress,
+              connectedAddress,
+              chain: baseSepolia.name,
+            });
           }
-
-          setNfts(ownedNFTs);
-          console.log("최종 소유한 NFT:", ownedNFTs);
-        } catch (error) {
-          console.log("NFT 조회 실패:", error);
-          setNfts([]);
         }
+
+        // 모든 컨트랙트에서 조회한 NFT들을 설정
+        console.log(
+          `🎉 전체 결과: ${allOwnedNFTs.length}개의 NFT를 찾았습니다!`
+        );
+        console.log("📋 최종 소유한 NFT 목록:", allOwnedNFTs);
+        setNfts(allOwnedNFTs);
+        console.log("✅ 모든 NFT 데이터 설정 완료");
       } catch (error) {
         console.log("NFT 조회 실패:", error);
         setNfts([]);
@@ -628,16 +648,22 @@ export default function CollectionPage() {
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
             {nfts.map((nft) => (
               <Link
-                key={nft.id}
-                href={`/my-nft/${nft.id}`}
+                key={`${nft.contractAddress}-${nft.id}`}
+                href={`/my-nft/${nft.tokenId}?contract=${nft.contractAddress}`}
                 className="group bg-white rounded-2xl shadow-sm overflow-hidden hover:shadow-lg transition-shadow"
                 onClick={() => {
-                  console.log("🔍 NFT 클릭:", {
-                    id: nft.id,
-                    tokenId: nft.tokenId,
-                    name: nft.name,
-                    href: `/my-nft/${nft.id}`,
-                  });
+                  console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+                  console.log("🔍 NFT 클릭!");
+                  console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+                  console.log("📋 NFT ID:", nft.id);
+                  console.log("📋 Token ID:", nft.tokenId);
+                  console.log("📝 Name:", nft.name);
+                  console.log("📝 Contract:", nft.contractAddress);
+                  console.log(
+                    "🔗 Href:",
+                    `/my-nft/${nft.tokenId}?contract=${nft.contractAddress}`
+                  );
+                  console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
                 }}
               >
                 <div className="aspect-square bg-white border border-gray-200 flex items-center justify-center relative overflow-hidden">

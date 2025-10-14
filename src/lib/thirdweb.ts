@@ -1,14 +1,52 @@
-// 컨트랙트 주소들 (thirdweb v5)
+import { getContract } from "thirdweb";
+import { defineChain } from "thirdweb/chains";
+import { createThirdwebClient } from "thirdweb";
+
+// 클라이언트 설정
+export const client = createThirdwebClient({
+  clientId:
+    process.env.NEXT_PUBLIC_THIRDWEB_CLIENT_ID ||
+    "2be3d5da6304165f5243bf4a3fe35aad",
+});
+
+// Base Sepolia 체인
+export const baseSepolia = defineChain({
+  id: 84532,
+  name: "Base Sepolia",
+  rpc: "https://sepolia.base.org",
+});
+
+// 컨트랙트 주소들 (환경변수에서 가져오기)
 export const NFT_CONTRACT_ADDRESS =
-  "0xD39E02bDaf4AD5685e42e64BcAc1e4b60e2Af628"; // 새로 배포한 NFT Collection
-export const ALTERNATIVE_NFT_CONTRACT_ADDRESS =
-  "0x950C48726a06517762252409b63F4B6fFE44A585"; // NFT Drop (백업용)
+  process.env.NEXT_PUBLIC_NFT_COLLECTION_ADDRESS ||
+  "0x8C9ecbA1e2540d4733c19b8e2F6d213a7248592a"; // ERC721 NFT Collection
+
 export const MARKETPLACE_CONTRACT_ADDRESS =
-  "0x738c8706366681f143FD3a18Eb477183041c6B59"; // Base Sepolia Marketplace V3 (thirdweb)
-export const ALTERNATIVE_MARKETPLACE_CONTRACT_ADDRESS =
-  "0x738c8706366681f143FD3a18Eb477183041c6B59"; // Marketplace V3 주소 (백업)
+  process.env.NEXT_PUBLIC_MARKETPLACE_ADDRESS ||
+  "0xd2D48B584902260DB216D66508148D25a7b0ef6a"; // NFT Market v3
+
 export const PAY_TOKEN_CONTRACT_ADDRESS =
-  "0x25C2F65Efe4624Cb1c009A4c0FD8540515Dbe71B"; // SBMB 토큰
+  process.env.NEXT_PUBLIC_ERC20_ADDRESS ||
+  "0xFD422282408204B877bc4a56b3265d4f7b6d94D1"; // ERC20 토큰
+
+// 컨트랙트 객체들
+export const NFT_CONTRACT = getContract({
+  client,
+  chain: baseSepolia,
+  address: NFT_CONTRACT_ADDRESS,
+});
+
+export const MARKETPLACE_CONTRACT = getContract({
+  client,
+  chain: baseSepolia,
+  address: MARKETPLACE_CONTRACT_ADDRESS,
+});
+
+export const PAY_TOKEN_CONTRACT = getContract({
+  client,
+  chain: baseSepolia,
+  address: PAY_TOKEN_CONTRACT_ADDRESS,
+});
 
 // Base Sepolia 체인 ID
 export const CHAIN_ID = 84532; // Base Sepolia 테스트넷

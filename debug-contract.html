@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>NFT 컨트랙트 디버깅 도구</title>
+    <style>
+      body {
+        font-family: "Courier New", monospace;
+        max-width: 1200px;
+        margin: 50px auto;
+        padding: 20px;
+        background: #1e1e1e;
+        color: #d4d4d4;
+      }
+      h1 {
+        color: #4ec9b0;
+        border-bottom: 2px solid #4ec9b0;
+        padding-bottom: 10px;
+      }
+      .section {
+        background: #252526;
+        border: 1px solid #3e3e42;
+        border-radius: 8px;
+        padding: 20px;
+        margin: 20px 0;
+      }
+      .section h2 {
+        color: #569cd6;
+        margin-top: 0;
+      }
+      button {
+        background: #0e639c;
+        color: white;
+        border: none;
+        padding: 12px 24px;
+        border-radius: 6px;
+        cursor: pointer;
+        font-size: 16px;
+        margin: 5px;
+      }
+      button:hover {
+        background: #1177bb;
+      }
+      button:disabled {
+        background: #555;
+        cursor: not-allowed;
+      }
+      .result {
+        background: #1e1e1e;
+        border: 1px solid #3e3e42;
+        border-radius: 4px;
+        padding: 15px;
+        margin-top: 15px;
+        white-space: pre-wrap;
+        word-wrap: break-word;
+        max-height: 400px;
+        overflow-y: auto;
+      }
+      .success {
+        color: #4ec9b0;
+      }
+      .error {
+        color: #f48771;
+      }
+      .warning {
+        color: #dcdcaa;
+      }
+      .info {
+        color: #9cdcfe;
+      }
+      input {
+        width: 100%;
+        padding: 10px;
+        background: #1e1e1e;
+        border: 1px solid #3e3e42;
+        border-radius: 4px;
+        color: #d4d4d4;
+        font-size: 14px;
+        margin: 10px 0;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>🔍 NFT 컨트랙트 디버깅 도구</h1>
+
+    <div class="section">
+      <h2>1. 연결 정보</h2>
+      <button onclick="connectWallet()">지갑 연결</button>
+      <div id="walletInfo" class="result"></div>
+    </div>
+
+    <div class="section">
+      <h2>2. 컨트랙트 진단</h2>
+      <label>컨트랙트 주소:</label>
+      <input
+        type="text"
+        id="contractAddress"
+        value="0x8C9ecbA1e2540d4733c19b8e2F6d213a7248592a"
+      />
+      <button onclick="diagnoseContract()">컨트랙트 진단</button>
+      <div id="diagnosisResult" class="result"></div>
+    </div>
+
+    <div class="section">
+      <h2>3. 사용 가능한 함수 확인</h2>
+      <button onclick="checkFunctions()">함수 목록 조회</button>
+      <div id="functionsResult" class="result"></div>
+    </div>
+
+    <div class="section">
+      <h2>4. 민팅 테스트 (수동)</h2>
+      <label>메타데이터 URI:</label>
+      <input type="text" id="tokenUri" placeholder="ipfs://..." />
+      <button onclick="testMintTo()">mintTo 테스트</button>
+      <button onclick="testMint()">mint 테스트</button>
+      <button onclick="testSafeMint()">safeMint 테스트</button>
+      <div id="mintResult" class="result"></div>
+    </div>
+
+    <script>
+      let provider;
+      let signer;
+      let address;
+      let contract;
+
+      async function connectWallet() {
+        const result = document.getElementById("walletInfo");
+        try {
+          if (typeof window.ethereum === "undefined") {
+            result.innerHTML =
+              '<span class="error">❌ MetaMask가 설치되지 않았습니다.</span>';
+            return;
+          }
+
+          const accounts = await window.ethereum.request({
+            method: "eth_requestAccounts",
+          });
+          address = accounts[0];
+
+          const chainId = await window.ethereum.request({
+            method: "eth_chainId",
+          });
+          const chainIdNum = parseInt(chainId, 16);
+
+          result.innerHTML = `
+<span class="success">✅ 지갑 연결 성공!</span>
+
+<span class="info">지갑 주소:</span> ${address}
+<span class="info">체인 ID:</span> ${chainIdNum} ${
+            chainIdNum === 84532
+              ? "(Base Sepolia ✓)"
+              : "(❌ Base Sepolia가 아닙니다!)"
+          }
+
+${
+  chainIdNum !== 84532
+    ? '<span class="warning">⚠️ Base Sepolia로 전환해주세요!</span>'
+    : ""
+}
+                `;
+
+          if (chainIdNum !== 84532) {
+            try {
+              await window.ethereum.request({
+                method: "wallet_switchEthereumChain",
+                params: [{ chainId: "0x14a34" }],
+              });
+              result.innerHTML +=
+                '<span class="success">\\n✅ Base Sepolia로 전환 완료!</span>';
+            } catch (error) {
+              result.innerHTML += `<span class="error">\\n❌ 네트워크 전환 실패: ${error.message}</span>`;
+            }
+          }
+        } catch (error) {
+          result.innerHTML = `<span class="error">❌ 연결 실패: ${error.message}</span>`;
+        }
+      }
+
+      async function diagnoseContract() {
+        const result = document.getElementById("diagnosisResult");
+        const contractAddress =
+          document.getElementById("contractAddress").value;
+
+        if (!address) {
+          result.innerHTML =
+            '<span class="error">❌ 먼저 지갑을 연결해주세요!</span>';
+          return;
+        }
+
+        result.innerHTML = '<span class="info">🔍 진단 중...</span>';
+
+        try {
+          const diagnostics = {
+            paused: null,
+            owner: null,
+            isOwner: false,
+            hasMinterRole: false,
+            maxSupply: null,
+            totalSupply: null,
+          };
+
+          // ABI 정의
+          const erc721Abi = [
+            "function paused() view returns (bool)",
+            "function owner() view returns (address)",
+            "function hasRole(bytes32 role, address account) view returns (bool)",
+            "function maxSupply() view returns (uint256)",
+            "function totalSupply() view returns (uint256)",
+            "function name() view returns (string)",
+            "function symbol() view returns (string)",
+          ];
+
+          // ethers.js 없이 직접 호출
+          const calls = [];
+
+          // 1. paused
+          try {
+            const data = await window.ethereum.request({
+              method: "eth_call",
+              params: [
+                {
+                  to: contractAddress,
+                  data: "0x5c975abb", // paused()
+                },
+                "latest",
+              ],
+            });
+            diagnostics.paused =
+              data ===
+              "0x0000000000000000000000000000000000000000000000000000000000000000"
+                ? false
+                : true;
+          } catch (e) {
+            diagnostics.paused = "N/A";
+          }
+
+          // 2. owner
+          try {
+            const data = await window.ethereum.request({
+              method: "eth_call",
+              params: [
+                {
+                  to: contractAddress,
+                  data: "0x8da5cb5b", // owner()
+                },
+                "latest",
+              ],
+            });
+            diagnostics.owner = "0x" + data.slice(-40);
+            diagnostics.isOwner =
+              diagnostics.owner.toLowerCase() === address.toLowerCase();
+          } catch (e) {
+            diagnostics.owner = "N/A";
+          }
+
+          // 3. totalSupply
+          try {
+            const data = await window.ethereum.request({
+              method: "eth_call",
+              params: [
+                {
+                  to: contractAddress,
+                  data: "0x18160ddd", // totalSupply()
+                },
+                "latest",
+              ],
+            });
+            diagnostics.totalSupply = parseInt(data, 16);
+          } catch (e) {
+            diagnostics.totalSupply = "N/A";
+          }
+
+          result.innerHTML = `
+<span class="success">✅ 컨트랙트 진단 완료!</span>
+
+<span class="info">━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━</span>
+<span class="info">📋 컨트랙트 정보</span>
+<span class="info">━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━</span>
+
+<span class="warning">주소:</span> ${contractAddress}
+
+<span class="warning">일시정지 상태:</span> ${
+            diagnostics.paused === false
+              ? '<span class="success">✓ 활성화</span>'
+              : diagnostics.paused === true
+              ? '<span class="error">✗ 일시정지됨</span>'
+              : "N/A"
+          }
+<span class="warning">소유자:</span> ${diagnostics.owner}
+<span class="warning">현재 계정이 소유자인가:</span> ${
+            diagnostics.isOwner
+              ? '<span class="success">✓ 예</span>'
+              : '<span class="error">✗ 아니오</span>'
+          }
+<span class="warning">총 발행량:</span> ${diagnostics.totalSupply}
+
+<span class="info">━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━</span>
+<span class="info">💡 분석 결과</span>
+<span class="info">━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━</span>
+
+${
+  diagnostics.paused === true
+    ? '<span class="error">❌ 컨트랙트가 일시정지 상태입니다!</span>\\n'
+    : ""
+}
+${
+  !diagnostics.isOwner
+    ? '<span class="warning">⚠️ 현재 계정이 컨트랙트 소유자가 아닙니다.</span>\\n'
+    : ""
+}
+${
+  diagnostics.isOwner
+    ? '<span class="success">✅ 소유자 계정으로 연결됨 - 민팅 권한 있음!</span>\\n'
+    : ""
+}
+
+<span class="info">━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━</span>
+
+<span class="warning">다음 단계:</span>
+1. "사용 가능한 함수 확인" 버튼 클릭
+2. mintTo, mint, safeMint 함수 존재 확인
+3. 민팅 테스트 진행
+                `;
+        } catch (error) {
+          result.innerHTML = `<span class="error">❌ 진단 실패: ${error.message}</span>`;
+        }
+      }
+
+      async function checkFunctions() {
+        const result = document.getElementById("functionsResult");
+        result.innerHTML = `
+<span class="info">🔍 컨트랙트 함수 확인 중...</span>
+
+<span class="warning">추천: thirdweb 대시보드에서 확인하세요!</span>
+👉 https://thirdweb.com/base-sepolia-testnet/${
+          document.getElementById("contractAddress").value
+        }
+
+<span class="info">대시보드에서 확인할 항목:</span>
+1. "Explorer" 탭 → "Functions" 확인
+2. mintTo, mint, safeMint 함수 존재 여부
+3. 각 함수의 파라미터 타입 확인
+
+<span class="success">또는 Base Sepolia Etherscan에서 확인:</span>
+👉 https://sepolia.basescan.org/address/${
+          document.getElementById("contractAddress").value
+        }#code
+            `;
+      }
+
+      async function testMintTo() {
+        const result = document.getElementById("mintResult");
+        const contractAddress =
+          document.getElementById("contractAddress").value;
+        const tokenUri = document.getElementById("tokenUri").value;
+
+        if (!address) {
+          result.innerHTML =
+            '<span class="error">❌ 먼저 지갑을 연결해주세요!</span>';
+          return;
+        }
+
+        if (!tokenUri) {
+          result.innerHTML =
+            '<span class="error">❌ 메타데이터 URI를 입력해주세요!</span>';
+          return;
+        }
+
+        result.innerHTML =
+          '<span class="info">🔄 mintTo 함수 호출 중...</span>';
+
+        try {
+          // mintTo(address to, string uri) 함수 호출
+          const params = [
+            {
+              from: address,
+              to: contractAddress,
+              data:
+                "0x" +
+                "755edd17" + // mintTo(address,string) function selector
+                address.slice(2).padStart(64, "0") + // to address
+                "0000000000000000000000000000000000000000000000000000000000000040" + // string offset
+                tokenUri.length.toString(16).padStart(64, "0") + // string length
+                Buffer.from(tokenUri)
+                  .toString("hex")
+                  .padEnd(Math.ceil(tokenUri.length / 32) * 64, "0"), // string data
+            },
+          ];
+
+          const txHash = await window.ethereum.request({
+            method: "eth_sendTransaction",
+            params,
+          });
+
+          result.innerHTML = `
+<span class="success">✅ 트랜잭션 전송 성공!</span>
+
+<span class="warning">TX Hash:</span> ${txHash}
+
+<span class="info">Etherscan에서 확인:</span>
+👉 https://sepolia.basescan.org/tx/${txHash}
+                `;
+        } catch (error) {
+          result.innerHTML = `
+<span class="error">❌ mintTo 실패!</span>
+
+<span class="warning">에러:</span> ${error.message}
+
+<span class="info">가능한 원인:</span>
+• 함수 시그니처가 다름
+• 권한 부족
+• 가스 부족
+                `;
+        }
+      }
+
+      // 페이지 로드 시 자동 연결 시도
+      window.addEventListener("load", () => {
+        if (typeof window.ethereum !== "undefined") {
+          window.ethereum
+            .request({ method: "eth_accounts" })
+            .then((accounts) => {
+              if (accounts.length > 0) {
+                connectWallet();
+              }
+            });
+        }
+      });
+    </script>
+  </body>
+</html>

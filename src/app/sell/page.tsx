@@ -117,37 +117,145 @@ export default function SellPage() {
           return;
         }
 
-        // 로컬 스토리지에서 메타데이터 조회
-        const storedMetadata = localStorage.getItem("lazyMintMetadata");
+        // 블록체인에서 실제 메타데이터 조회
+        console.log("📝 TokenURI 조회 시작...");
+
+        let tokenURI = "";
         let metadata = null;
 
-        if (storedMetadata) {
-          try {
-            metadata = JSON.parse(storedMetadata);
-          } catch (e) {
-            console.log("메타데이터 파싱 실패:", e);
+        try {
+          const tokenURIResult = await readContract({
+            contract: nftContract,
+            method: "function tokenURI(uint256 tokenId) view returns (string)",
+            params: [BigInt(tokenId)],
+          });
+
+          tokenURI = tokenURIResult;
+          console.log("📦 TokenURI 조회 완료:", tokenURI);
+
+          // 메타데이터 가져오기
+          if (tokenURI && tokenURI.trim() !== "") {
+            let urlsToTry = [];
+
+            if (tokenURI.startsWith("ipfs://")) {
+              const ipfsHash = tokenURI.replace("ipfs://", "");
+              console.log("📝 IPFS 해시:", ipfsHash);
+              urlsToTry = [
+                `https://ipfs.io/ipfs/${ipfsHash}`, // thirdweb 기본
+                `https://${ipfsHash}.ipfs.nftstorage.link`, // NFT Storage
+                `https://gray-famous-lemming-869.mypinata.cloud/ipfs/${ipfsHash}`, // Pinata 커스텀
+                `https://gateway.pinata.cloud/ipfs/${ipfsHash}`, // Pinata 공식
+                `https://cloudflare-ipfs.com/ipfs/${ipfsHash}`, // Cloudflare
+              ];
+            } else {
+              urlsToTry = [tokenURI];
+            }
+
+            console.log(
+              "🔄 메타데이터 로딩 시도 중... (총 " +
+                urlsToTry.length +
+                "개 게이트웨이)"
+            );
+
+            for (let i = 0; i < urlsToTry.length; i++) {
+              const url = urlsToTry[i];
+              console.log(`📝 ${i + 1}/${urlsToTry.length} 시도: ${url}`);
+
+              try {
+                const response = await fetch(url);
+                if (response.ok) {
+                  metadata = await response.json();
+                  console.log(`✅ ${i + 1}/${urlsToTry.length} 성공!`);
+                  console.log("📦 로드된 메타데이터:", metadata);
+                  break;
+                } else {
+                  console.log(
+                    `❌ ${i + 1}/${urlsToTry.length} 실패: HTTP ${
+                      response.status
+                    }`
+                  );
+                }
+              } catch (error) {
+                console.log(`❌ ${i + 1}/${urlsToTry.length} 실패:`, error);
+              }
+            }
+
+            if (!metadata) {
+              console.log("❌ 모든 게이트웨이에서 메타데이터 로드 실패");
+            }
+          } else {
+            console.log("⚠️ TokenURI가 비어있습니다");
           }
+        } catch (error) {
+          console.error("❌ TokenURI 조회 실패:", error);
         }
 
-        // 카테고리 아이콘 매핑
-        const categoryIcons = {
-          art: "🎨",
-          utility: "🔧",
-          activity: "🏃",
-        };
+        // 이미지 URL 처리 (다중 게이트웨이 지원)
+        let imageUrl = "🎨";
+        let imageGateways = [];
+
+        if (metadata?.image) {
+          console.log("🖼️ 메타데이터 이미지:", metadata.image);
+
+          if (metadata.image.startsWith("ipfs://")) {
+            const ipfsHash = metadata.image.replace("ipfs://", "");
+            console.log("🖼️ IPFS 해시:", ipfsHash);
+
+            // 여러 게이트웨이 URL 생성
+            imageGateways = [
+              `https://ipfs.io/ipfs/${ipfsHash}`, // thirdweb 기본
+              `https://${ipfsHash}.ipfs.nftstorage.link`, // NFT Storage
+              `https://gray-famous-lemming-869.mypinata.cloud/ipfs/${ipfsHash}`, // Pinata 커스텀
+              `https://gateway.pinata.cloud/ipfs/${ipfsHash}`, // Pinata 공식
+              `https://cloudflare-ipfs.com/ipfs/${ipfsHash}`, // Cloudflare
+            ];
+
+            // 첫 번째 게이트웨이를 기본값으로 사용
+            imageUrl = imageGateways[0];
+            console.log("🖼️ IPFS 이미지 변환:", imageUrl);
+            console.log("🖼️ 사용 가능한 게이트웨이:", imageGateways);
+          } else if (
+            metadata.image.startsWith("http://") ||
+            metadata.image.startsWith("https://")
+          ) {
+            imageUrl = metadata.image;
+            imageGateways = [metadata.image];
+            console.log("🖼️ HTTP 이미지 사용:", imageUrl);
+          } else {
+            imageUrl = metadata.image; // 이모지 등
+            console.log("🖼️ 기타 이미지 사용:", imageUrl);
+          }
+        } else {
+          console.log("⚠️ 메타데이터에 이미지 없음, 기본값 사용");
+        }
+
+        console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        console.log("📦 최종 NFT 데이터 구성:");
+        console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        console.log("📝 Name:", metadata?.name || `NFT #${tokenId}`);
+        console.log(
+          "📝 Description:",
+          metadata?.description || "No description"
+        );
+        console.log("🖼️ Image URL:", imageUrl);
+        console.log("📋 Category:", metadata?.category || "art");
+        console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
 
         const nftData = {
           id: Number(tokenId),
-          name: metadata?.name || `춘심이네 NFT #${tokenId}`,
-          collection: "춘심이네 NFT Collection",
-          image: metadata?.image || categoryIcons[metadata?.category] || "🎁",
+          name: metadata?.name || `NFT #${tokenId}`,
+          collection: metadata?.collection || "NFT Collection",
+          image: imageUrl,
           category: metadata?.category || "art",
-          description: metadata?.description || "민팅된 NFT",
-          price: metadata?.price || "0",
-          creator: "춘심이네",
+          description: metadata?.description || "No description available",
+          price: "0",
+          creator: "Creator",
           contractAddress: NFT_CONTRACT_ADDRESS,
           tokenStandard: "ERC-721",
           blockchain: "BASE",
+          tokenURI: tokenURI,
+          metadata: metadata,
+          imageGateways: imageGateways || [],
         };
 
         setNft(nftData);
@@ -489,8 +597,29 @@ export default function SellPage() {
           <div className="space-y-6">
             {/* NFT 이미지 */}
             <div className="bg-white rounded-2xl shadow-sm overflow-hidden">
-              <div className="aspect-square bg-gradient-to-br from-teal-400 to-teal-600 flex items-center justify-center">
-                <div className="text-8xl">{nft.image}</div>
+              <div className="aspect-square bg-gray-100 flex items-center justify-center overflow-hidden">
+                {nft.image &&
+                (nft.image.startsWith("http://") ||
+                  nft.image.startsWith("https://")) ? (
+                  <img
+                    src={nft.image}
+                    alt={nft.name}
+                    className="w-full h-full object-cover"
+                    onError={(e) => {
+                      console.error("🖼️ 이미지 로드 실패:", nft.image);
+                      e.currentTarget.style.display = "none";
+                      if (e.currentTarget.parentElement) {
+                        e.currentTarget.parentElement.innerHTML =
+                          '<span class="text-8xl">🎨</span>';
+                      }
+                    }}
+                    onLoad={() => {
+                      console.log("✅ 이미지 로드 성공:", nft.image);
+                    }}
+                  />
+                ) : (
+                  <span className="text-8xl">{nft.image || "🎨"}</span>
+                )}
               </div>
             </div>
 
