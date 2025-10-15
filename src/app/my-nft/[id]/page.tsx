@@ -14,6 +14,7 @@ import { client } from "@/lib/wallet";
 import { NFT_CONTRACT_ADDRESS } from "@/lib/thirdweb";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
+import { convertIPFSUrl } from "@/utils/ipfs";
 
 export default function MyNFTDetailPage() {
   const params = useParams();
@@ -122,11 +123,9 @@ export default function MyNFTDetailPage() {
             const ipfsHash = tokenURIResult.replace("ipfs://", "");
             console.log("📝 IPFS 해시:", ipfsHash);
             urlsToTry = [
-              `https://ipfs.io/ipfs/${ipfsHash}`, // thirdweb 기본
-              `https://${ipfsHash}.ipfs.nftstorage.link`, // NFT Storage
-              `https://gray-famous-lemming-869.mypinata.cloud/ipfs/${ipfsHash}`, // Pinata 커스텀
+              `https://gray-famous-lemming-869.mypinata.cloud/ipfs/${ipfsHash}`, // ⚡ Pinata 커스텀 (1순위)
               `https://gateway.pinata.cloud/ipfs/${ipfsHash}`, // Pinata 공식
-              `https://cloudflare-ipfs.com/ipfs/${ipfsHash}`, // Cloudflare
+              `https://ipfs.io/ipfs/${ipfsHash}`, // ipfs.io
             ];
           } else {
             urlsToTry = [tokenURIResult];
@@ -170,10 +169,7 @@ export default function MyNFTDetailPage() {
           console.log("🖼️ 메타데이터 이미지:", metadata.image);
 
           if (metadata.image.startsWith("ipfs://")) {
-            const ipfsHash = metadata.image.replace("ipfs://", "");
-            // thirdweb 기본 게이트웨이 우선
-            imageUrl = `https://ipfs.io/ipfs/${ipfsHash}`;
-            console.log("🖼️ IPFS 이미지 변환:", imageUrl);
+            imageUrl = convertIPFSUrl(metadata.image); // ⚡ IPFS URL 변환
           } else if (
             metadata.image.startsWith("http://") ||
             metadata.image.startsWith("https://")

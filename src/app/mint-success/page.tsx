@@ -1,12 +1,13 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
+import { convertIPFSUrl } from "@/utils/ipfs";
 
-export default function MintSuccessPage() {
+function MintSuccessContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const [nftData, setNftData] = useState<any>(null);
@@ -34,14 +35,16 @@ export default function MintSuccessPage() {
     };
 
     if (tokenId && txHash) {
+      // ⚡ 이미지 URL 처리 (이미 HTTP로 변환되어 전달됨)
+      const finalImage = nftImage || categoryIcons[category as keyof typeof categoryIcons] || "🎨";
+      
+      console.log("🖼️ 민팅 성공 페이지 이미지:", finalImage);
+
       setNftData({
         tokenId,
         name: nftName || `춘심이네 NFT #${tokenId}`,
         collection: "춘심이네 NFT Collection",
-        image:
-          nftImage ||
-          categoryIcons[category as keyof typeof categoryIcons] ||
-          "🎨",
+        image: finalImage,
         description: nftDescription || "",
         category: category || "art",
         creator: "춘심이네",
@@ -278,5 +281,22 @@ export default function MintSuccessPage() {
 
       <Footer />
     </div>
+  );
+}
+
+export default function MintSuccessPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-500 mx-auto mb-4"></div>
+            <p className="text-gray-600">Loading...</p>
+          </div>
+        </div>
+      }
+    >
+      <MintSuccessContent />
+    </Suspense>
   );
 }

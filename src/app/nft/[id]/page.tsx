@@ -4,12 +4,12 @@ import { useState, useEffect } from "react";
 import { useParams } from "next/navigation";
 import { useActiveAccount } from "thirdweb/react";
 import { prepareContractCall, readContract, sendTransaction } from "thirdweb";
-import { useActiveWallet } from "thirdweb/react";
 import {
   NFT_CONTRACT,
   MARKETPLACE_CONTRACT,
   PAY_TOKEN_CONTRACT,
 } from "@/lib/thirdweb";
+import { convertIPFSUrl } from "@/utils/ipfs";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
 
@@ -44,10 +44,10 @@ export default function NFTDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [isPurchasing, setIsPurchasing] = useState(false);
 
-  // 안전한 fetch 함수 (CORS 문제 해결)
+  // ⚡️ 극한 최적화: 2초 타임아웃
   const safeFetch = async (
     url: string,
-    timeout = 10000
+    timeout = 2000 // 5초 → 2초로 단축!
   ): Promise<{ success: boolean; data?: unknown; error?: string }> => {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeout);
@@ -74,9 +74,11 @@ export default function NFTDetailPage() {
 
   // IPFS URL을 HTTP URL로 변환
   const convertIPFSUrl = (ipfsUrl: string): string => {
+    if (!ipfsUrl) return "";
     if (ipfsUrl.startsWith("ipfs://")) {
       const hash = ipfsUrl.replace("ipfs://", "");
-      return `https://ipfs.io/ipfs/${hash}`;
+      // 커스텀 Pinata 게이트웨이 우선 사용
+      return `https://gray-famous-lemming-869.mypinata.cloud/ipfs/${hash}`;
     }
     return ipfsUrl;
   };
@@ -120,8 +122,6 @@ export default function NFTDetailPage() {
 
         console.log("✅ 승인 트랜잭션:", approveResult.transactionHash);
 
-        // 승인 트랜잭션 완료 대기
-        await approveResult.result;
         console.log("✅ ERC20 토큰 승인 완료");
       }
 
@@ -158,9 +158,6 @@ export default function NFTDetailPage() {
       });
 
       console.log("✅ 구매 트랜잭션:", purchaseResult.transactionHash);
-
-      // 구매 트랜잭션 완료 대기
-      await purchaseResult.result;
       console.log("🎉 NFT 구매 완료!");
 
       // 4. 성공 알림 및 페이지 새로고침
@@ -201,15 +198,20 @@ export default function NFTDetailPage() {
         setError(null);
 
         const tokenId = params.id as string;
-        console.log("🔍 NFT 상세 정보 조회 시작:", tokenId);
 
-        // 1. TokenURI 가져오기
-        const tokenURIResult = await readContract({
-          contract: NFT_CONTRACT,
-          method: "function tokenURI(uint256) view returns (string)",
-          params: [BigInt(tokenId)],
-        });
-        console.log("📡 TokenURI:", tokenURIResult);
+        // ⚡ 극한 최적화 1: 블록체인 조회 병렬화 (tokenURI + owner 동시)
+        const [tokenURIResult, owner] = await Promise.all([
+          readContract({
+            contract: NFT_CONTRACT,
+            method: "function tokenURI(uint256) view returns (string)",
+            params: [BigInt(tokenId)],
+          }),
+          readContract({
+            contract: NFT_CONTRACT,
+            method: "function ownerOf(uint256) view returns (address)",
+            params: [BigInt(tokenId)],
+          }),
+        ]);
 
         if (!tokenURIResult || tokenURIResult.trim() === "") {
           throw new Error("TokenURI가 비어있습니다");
@@ -221,103 +223,75 @@ export default function NFTDetailPage() {
 
         if (tokenURIResult.startsWith("ipfs://")) {
           const ipfsHash = tokenURIResult.replace("ipfs://", "");
-          console.log("🔗 IPFS 해시:", ipfsHash);
+          // ⚡️ 가장 빠른 게이트웨이 3개만 (우선순위 순)
           urlsToTry.push(
-            // 기본 IPFS 게이트웨이들
-            `https://ipfs.io/ipfs/${ipfsHash}`,
-            `https://gateway.pinata.cloud/ipfs/${ipfsHash}`,
-            `https://dweb.link/ipfs/${ipfsHash}`,
-
-            // NFT Storage 게이트웨이 (소문자)
-            `https://${ipfsHash.toLowerCase()}.ipfs.nftstorage.link`,
-
-            // Cloudflare IPFS
-            `https://cloudflare-ipfs.com/ipfs/${ipfsHash}`,
-
-            // IPFS Public Gateway
-            `https://ipfs.fleek.co/ipfs/${ipfsHash}`,
-
-            // 추가 게이트웨이들
-            `https://ipfs.eth.aragon.network/ipfs/${ipfsHash}`,
-            `https://ipfs.io/ipfs/${ipfsHash}`,
-
-            // 사용자 커스텀 Pinata (마지막에 시도)
-            `https://gray-famous-lemming-869.mypinata.cloud/ipfs/${ipfsHash}`
+            `https://gray-famous-lemming-869.mypinata.cloud/ipfs/${ipfsHash}`, // 1순위: 커스텀
+            `https://gateway.pinata.cloud/ipfs/${ipfsHash}`, // 2순위
+            `https://ipfs.io/ipfs/${ipfsHash}` // 3순위
           );
         } else {
           urlsToTry.push(tokenURIResult);
         }
 
-        console.log("📋 시도할 URL 목록:", urlsToTry);
+        // ⚡️ Promise.race: 가장 빠른 응답만 사용! (2초 타임아웃)
+        try {
+          const racePromise = Promise.race(
+            urlsToTry.map((url) =>
+              safeFetch(url, 2000).then((result) => {
+                if (result.success) {
+                  return { url, data: result.data };
+                }
+                throw new Error(`Failed: ${url}`);
+              })
+            )
+          );
 
-        // 🚀 병렬 처리: 모든 게이트웨이를 동시에 시도하고 가장 빠른 것 사용
-        const fetchPromises = urlsToTry.map((url, index) =>
-          safeFetch(url, 5000) // 5초 타임아웃 (병렬이므로 짧게)
-            .then((result) => ({
-              url,
-              index,
-              result,
-            }))
-        );
-
-        // Promise.race 대신 Promise.allSettled로 모든 결과 확인
-        const results = await Promise.allSettled(fetchPromises);
-
-        for (const promiseResult of results) {
-          if (
-            promiseResult.status === "fulfilled" &&
-            promiseResult.value.result.success
-          ) {
-            metadata = promiseResult.value.result.data as NFTMetadata;
-            console.log(
-              "✅ 메타데이터 성공 (게이트웨이):",
-              promiseResult.value.url
-            );
-            console.log("✅ 메타데이터:", metadata);
-            break;
-          }
-        }
-
-        if (!metadata) {
-          console.log("❌ 모든 메타데이터 게이트웨이 실패");
-          console.log("📋 시도한 URL들:", urlsToTry);
-
-          // 기본 메타데이터로 대체
+          const fastest = await racePromise;
+          metadata = fastest.data as NFTMetadata;
+        } catch {
+          // 모든 게이트웨이 실패 시 기본값
           metadata = {
-            name: `춘심이네 NFT #${tokenId}`,
-            description: "춘심이네 NFT 컬렉션의 특별한 작품입니다.",
+            name: `NFT #${tokenId}`,
+            description: "메타데이터를 불러올 수 없습니다.",
             image: "🎨",
           };
-          console.log("🔄 기본 메타데이터 사용:", metadata);
         }
 
-        // 3. 소유자 정보 가져오기
-        const owner = await readContract({
-          contract: NFT_CONTRACT,
-          method: "function ownerOf(uint256) view returns (address)",
-          params: [BigInt(tokenId)],
-        });
-        console.log("👤 소유자:", owner);
+        // ⚡ 극한 최적화 2: 먼저 기본 NFT 데이터 표시, 리스팅은 나중에
+        // 기본 NFT 데이터를 먼저 설정하여 즉시 렌더링
+        const basicNftData: NFTData = {
+          tokenId,
+          contractAddress: NFT_CONTRACT.address,
+          metadata: metadata
+            ? {
+                ...metadata,
+                image: convertIPFSUrl(metadata.image), // IPFS URL을 HTTP로 변환
+              }
+            : null,
+          owner,
+          isListed: false,
+          creator: "춘심이네",
+          tokenURI: tokenURIResult,
+        };
 
-        // 4. 마켓플레이스에서 리스팅 정보 확인
+        setNftData(basicNftData); // 🚀 즉시 표시!
+        setIsLoading(false); // 로딩 완료!
+
+        // 4. 마켓플레이스 리스팅 정보는 백그라운드에서 조회
         let price: string | undefined;
         let isListed = false;
         let listingId: string | undefined;
 
         try {
           // totalListings로 개수 확인 후 개별 조회
-          console.log("📋 마켓플레이스 리스팅 조회 중...");
-
           const totalListingsCount = await readContract({
             contract: MARKETPLACE_CONTRACT,
             method: "function totalListings() view returns (uint256)",
             params: [],
           });
 
-          console.log("📋 전체 리스팅 개수:", totalListingsCount.toString());
-
-          // 🚀 병렬 처리: 최대 10개 리스팅만 동시 조회
-          const maxListings = Math.min(Number(totalListingsCount), 10);
+          // ⚡️ 극한 최적화: 최대 5개만 조회
+          const maxListings = Math.min(Number(totalListingsCount), 5);
 
           const listingPromises = [];
           for (let i = 0; i < maxListings; i++) {
@@ -328,8 +302,28 @@ export default function NFTDetailPage() {
                   "function getListing(uint256) view returns (uint256,uint256,uint256,uint256,uint128,uint128,address,address,address,uint8,uint8,bool)",
                 params: [BigInt(i)],
               })
-                .then((listing) => ({ index: i, listing, success: true }))
-                .catch((error) => ({ index: i, error, success: false }))
+                .then((listing) => ({
+                  index: i,
+                  listing: listing as readonly [
+                    bigint,
+                    bigint,
+                    bigint,
+                    bigint,
+                    bigint,
+                    bigint,
+                    string,
+                    string,
+                    string,
+                    number,
+                    number,
+                    boolean
+                  ],
+                  success: true as const,
+                }))
+                .catch(() => ({
+                  index: i,
+                  success: false as const,
+                }))
             );
           }
 
@@ -338,24 +332,22 @@ export default function NFTDetailPage() {
           for (const result of listingResults) {
             if (!result.success) continue;
 
+            // TypeScript 타입 가드
+            if (!("listing" in result)) continue;
+
             const [
               _listingId,
               _tokenId,
-              _quantity,
+              ,
               _pricePerToken,
-              _startTimestamp,
-              _endTimestamp,
-              _listingCreator,
+              ,
+              ,
+              ,
               _assetContract,
-              _currency,
-              _tokenType,
+              ,
+              ,
               _status,
-              _reserved,
             ] = result.listing;
-
-            console.log(
-              `📋 리스팅 ${result.index}: tokenId=${_tokenId}, status=${_status}`
-            );
 
             // 현재 NFT와 일치하는지 확인
             if (
@@ -367,47 +359,27 @@ export default function NFTDetailPage() {
               listingId = _listingId.toString();
               price = (Number(_pricePerToken) / 1e18).toString();
               isListed = true;
-              console.log("💰 리스팅 발견!");
-              console.log("   - 리스팅 ID:", listingId);
-              console.log("   - 가격:", price, "SBMB");
-              console.log("   - 판매자:", _listingCreator);
               break;
             }
           }
-
-          if (!isListed) {
-            console.log("📋 이 NFT는 현재 판매 중이 아닙니다.");
+          // 🚀 리스팅 정보가 있으면 NFT 데이터 업데이트
+          if (isListed && price) {
+            setNftData((prev) => ({
+              ...prev!,
+              price,
+              isListed,
+              listingId,
+            }));
           }
-        } catch (error) {
-          console.log("⚠️ 리스팅 정보 조회 실패:", error);
+        } catch {
+          // 리스팅 조회 실패는 무시 (선택사항)
         }
-
-        // 5. NFT 데이터 구성
-        const nftData: NFTData = {
-          tokenId,
-          contractAddress: NFT_CONTRACT.address,
-          metadata: {
-            ...metadata,
-            image: convertIPFSUrl(metadata.image),
-          },
-          owner,
-          price,
-          isListed,
-          creator: "춘심이네",
-          tokenURI: tokenURIResult,
-          listingId, // 마켓플레이스 리스팅 ID 추가
-        };
-
-        setNftData(nftData);
-        console.log("✅ NFT 데이터 구성 완료:", nftData);
       } catch (error) {
-        console.error("❌ NFT 데이터 조회 실패:", error);
         setError(
           error instanceof Error
             ? error.message
             : "알 수 없는 오류가 발생했습니다"
         );
-      } finally {
         setIsLoading(false);
       }
     };
@@ -415,14 +387,32 @@ export default function NFTDetailPage() {
     fetchNFTData();
   }, [params.id]);
 
+  // ⚡ 극한 최적화 3: 스켈레톤 UI - 즉시 렌더링!
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-500 mx-auto mb-4"></div>
-          <p className="text-gray-600">NFT 정보를 불러오는 중...</p>
+      <>
+        <Header />
+        <div className="min-h-screen bg-gray-50">
+          <div className="max-w-7xl mx-auto px-4 py-8">
+            <div className="bg-white rounded-xl shadow-lg overflow-hidden">
+              <div className="grid md:grid-cols-2 gap-8 p-8">
+                {/* 이미지 스켈레톤 */}
+                <div className="aspect-square bg-gray-200 rounded-lg animate-pulse"></div>
+
+                {/* 정보 스켈레톤 */}
+                <div className="space-y-6">
+                  <div className="h-8 bg-gray-200 rounded w-3/4 animate-pulse"></div>
+                  <div className="h-4 bg-gray-200 rounded w-1/2 animate-pulse"></div>
+                  <div className="h-20 bg-gray-200 rounded animate-pulse"></div>
+                  <div className="h-12 bg-gray-200 rounded w-1/3 animate-pulse"></div>
+                  <div className="h-12 bg-green-200 rounded animate-pulse"></div>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
-      </div>
+        <Footer />
+      </>
     );
   }
 
@@ -482,22 +472,14 @@ export default function NFTDetailPage() {
                     src={nftData.metadata.image}
                     alt={nftData.metadata.name || "NFT"}
                     className="w-full h-full object-cover"
+                    loading="lazy"
+                    decoding="async"
                     onError={(e) => {
-                      console.error(
-                        "🖼️ 이미지 로드 실패:",
-                        nftData.metadata?.image
-                      );
                       e.currentTarget.style.display = "none";
                       if (e.currentTarget.parentElement) {
                         e.currentTarget.parentElement.innerHTML =
                           '<span class="text-8xl">🎨</span>';
                       }
-                    }}
-                    onLoad={() => {
-                      console.log(
-                        "✅ 이미지 로드 성공:",
-                        nftData.metadata?.image
-                      );
                     }}
                   />
                 ) : (

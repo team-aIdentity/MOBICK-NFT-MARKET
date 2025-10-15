@@ -16,102 +16,62 @@ const PINATA_SECRET_KEY =
 const PINATA_GATEWAY_TOKEN =
   "UHWXvO0yfhuWgUiWlPTtdQKSA7Bp1lRpAAXAcYzZ__PuxBCvtJ2W7Brth4Q6V8UI";
 
-// Pinata 업로드 함수들
+// ⚡ Pinata 업로드 함수들 (최적화)
 const uploadImageToPinata = async (file: File): Promise<string> => {
-  console.log("🚀 Pinata 이미지 업로드 시작:", {
-    fileName: file.name,
-    fileSize: file.size,
-    fileType: file.type,
-    apiKey: PINATA_API_KEY.substring(0, 10) + "...",
-    secretKey: PINATA_SECRET_KEY.substring(0, 10) + "...",
-  });
-
   const formData = new FormData();
   formData.append("file", file);
 
-  try {
-    const response = await fetch(
-      "https://api.pinata.cloud/pinning/pinFileToIPFS",
-      {
-        method: "POST",
-        headers: {
-          pinata_api_key: PINATA_API_KEY,
-          pinata_secret_api_key: PINATA_SECRET_KEY,
-        },
-        body: formData,
-      }
-    );
-
-    console.log("📡 Pinata 응답 상태:", response.status, response.statusText);
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error("❌ Pinata 업로드 실패:", errorText);
-      throw new Error(
-        `Pinata 이미지 업로드 실패: ${response.statusText} - ${errorText}`
-      );
+  const response = await fetch(
+    "https://api.pinata.cloud/pinning/pinFileToIPFS",
+    {
+      method: "POST",
+      headers: {
+        pinata_api_key: PINATA_API_KEY,
+        pinata_secret_api_key: PINATA_SECRET_KEY,
+      },
+      body: formData,
     }
+  );
 
-    const result = await response.json();
-    console.log("✅ Pinata 업로드 성공:", result);
-    const ipfsUrl = `ipfs://${result.IpfsHash}`;
-    console.log("🔗 생성된 IPFS URL:", ipfsUrl);
-    return ipfsUrl;
-  } catch (error) {
-    console.error("💥 Pinata 업로드 중 오류:", error);
-    throw error;
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(
+      `Pinata 이미지 업로드 실패: ${response.statusText} - ${errorText}`
+    );
   }
+
+  const result = await response.json();
+  return `ipfs://${result.IpfsHash}`;
 };
 
 const uploadMetadataToPinata = async (metadata: any): Promise<string> => {
-  console.log("🚀 Pinata 메타데이터 업로드 시작:", {
-    metadata: metadata,
-    apiKey: PINATA_API_KEY.substring(0, 10) + "...",
-    secretKey: PINATA_SECRET_KEY.substring(0, 10) + "...",
-  });
-
-  try {
-    const response = await fetch(
-      "https://api.pinata.cloud/pinning/pinJSONToIPFS",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          pinata_api_key: PINATA_API_KEY,
-          pinata_secret_api_key: PINATA_SECRET_KEY,
+  const response = await fetch(
+    "https://api.pinata.cloud/pinning/pinJSONToIPFS",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        pinata_api_key: PINATA_API_KEY,
+        pinata_secret_api_key: PINATA_SECRET_KEY,
+      },
+      body: JSON.stringify({
+        pinataContent: metadata,
+        pinataMetadata: {
+          name: `NFT Metadata - ${metadata.name}`,
         },
-        body: JSON.stringify({
-          pinataContent: metadata,
-          pinataMetadata: {
-            name: `NFT Metadata - ${metadata.name}`,
-          },
-        }),
-      }
-    );
-
-    console.log(
-      "📡 Pinata 메타데이터 응답 상태:",
-      response.status,
-      response.statusText
-    );
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error("❌ Pinata 메타데이터 업로드 실패:", errorText);
-      throw new Error(
-        `Pinata 메타데이터 업로드 실패: ${response.statusText} - ${errorText}`
-      );
+      }),
     }
+  );
 
-    const result = await response.json();
-    console.log("✅ Pinata 메타데이터 업로드 성공:", result);
-    const ipfsUrl = `ipfs://${result.IpfsHash}`;
-    console.log("🔗 생성된 메타데이터 IPFS URL:", ipfsUrl);
-    return ipfsUrl;
-  } catch (error) {
-    console.error("💥 Pinata 메타데이터 업로드 중 오류:", error);
-    throw error;
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(
+      `Pinata 메타데이터 업로드 실패: ${response.statusText} - ${errorText}`
+    );
   }
+
+  const result = await response.json();
+  return `ipfs://${result.IpfsHash}`;
 };
 import { baseSepolia } from "thirdweb/chains";
 import Header from "@/components/Header";
@@ -148,9 +108,8 @@ export default function MintPage() {
     description: "",
     category: "",
     collection: "",
-    price: "",
     quantity: "1",
-    royalties: "5",
+    royalties: "5", // 기본 로열티 5%
     file: null as File | null,
     filePreview: null as string | null,
   });
@@ -342,7 +301,7 @@ export default function MintPage() {
       return;
     }
 
-    if (!formData.name || !formData.category || !formData.price) {
+    if (!formData.name || !formData.category) {
       alert("필수 항목을 모두 입력해주세요.");
       return;
     }
@@ -424,10 +383,9 @@ export default function MintPage() {
         }
       }
 
-      console.log("✅ 민팅 준비 완료 (Base Sepolia / SBMB):", {
+      console.log("✅ 민팅 준비 완료 (Base Sepolia):", {
         name: formData.name,
         category: formData.category,
-        price: `${formData.price} SBMB`,
         connectedAddress,
         hasAccount: !!account,
         chain: "Base Sepolia (84532)",
@@ -487,10 +445,6 @@ export default function MintPage() {
           {
             trait_type: "Category",
             value: formData.category,
-          },
-          {
-            trait_type: "Price",
-            value: `${formData.price} SBMB`,
           },
         ],
       };
@@ -554,7 +508,6 @@ export default function MintPage() {
         description: formData.description,
         category: formData.category,
         image: categoryIcons[formData.category] || "🎁",
-        price: formData.price,
         timestamp: Date.now(),
       };
       localStorage.setItem("lazyMintMetadata", JSON.stringify(lazyMintData));
@@ -605,20 +558,20 @@ export default function MintPage() {
       try {
         // 1. 컨트랙트가 일시 정지 상태인지 확인
         try {
-        const isPaused = await readContract({
-          contract: nftContract,
-          method: "function paused() view returns (bool)",
-          params: [],
-        });
+          const isPaused = await readContract({
+            contract: nftContract,
+            method: "function paused() view returns (bool)",
+            params: [],
+          });
           contractDiagnostics.paused = isPaused;
-        console.log("📋 컨트랙트 일시 정지 상태:", isPaused);
+          console.log("📋 컨트랙트 일시 정지 상태:", isPaused);
 
-        if (isPaused) {
-          alert(
+          if (isPaused) {
+            alert(
               "❌ 컨트랙트가 일시 정지 상태입니다.\n\n민팅이 비활성화되어 있습니다."
-          );
-          setIsMinting(false);
-          return;
+            );
+            setIsMinting(false);
+            return;
           }
         } catch (pausedError) {
           console.log("⚠️ paused() 함수가 없거나 확인 불가:", pausedError);
@@ -627,15 +580,15 @@ export default function MintPage() {
 
         // 2. 컨트랙트 소유자 확인
         try {
-        const owner = await readContract({
-          contract: nftContract,
-          method: "function owner() view returns (address)",
-          params: [],
-        });
+          const owner = await readContract({
+            contract: nftContract,
+            method: "function owner() view returns (address)",
+            params: [],
+          });
           contractDiagnostics.owner = owner;
           contractDiagnostics.isOwner =
             owner.toLowerCase() === connectedAddress.toLowerCase();
-        console.log("📋 컨트랙트 소유자:", owner);
+          console.log("📋 컨트랙트 소유자:", owner);
           console.log(
             "📋 현재 사용자가 소유자인가:",
             contractDiagnostics.isOwner
@@ -663,13 +616,13 @@ export default function MintPage() {
 
         // 4. 공급량 확인
         try {
-        const maxSupply = await readContract({
-          contract: nftContract,
-          method: "function maxSupply() view returns (uint256)",
-          params: [],
-        });
+          const maxSupply = await readContract({
+            contract: nftContract,
+            method: "function maxSupply() view returns (uint256)",
+            params: [],
+          });
           contractDiagnostics.maxSupply = maxSupply.toString();
-        console.log("📋 최대 공급량:", maxSupply.toString());
+          console.log("📋 최대 공급량:", maxSupply.toString());
         } catch (maxSupplyError) {
           console.log(
             "⚠️ maxSupply() 함수가 없거나 확인 불가:",
@@ -679,13 +632,13 @@ export default function MintPage() {
         }
 
         try {
-        const totalSupply = await readContract({
-          contract: nftContract,
-          method: "function totalSupply() view returns (uint256)",
-          params: [],
-        });
+          const totalSupply = await readContract({
+            contract: nftContract,
+            method: "function totalSupply() view returns (uint256)",
+            params: [],
+          });
           contractDiagnostics.totalSupply = totalSupply.toString();
-        console.log("📋 현재 공급량:", totalSupply.toString());
+          console.log("📋 현재 공급량:", totalSupply.toString());
 
           if (contractDiagnostics.maxSupply !== "unlimited") {
             contractDiagnostics.isMaxSupplyReached =
@@ -694,9 +647,9 @@ export default function MintPage() {
               alert(
                 "❌ 최대 공급량에 도달했습니다.\n\n더 이상 민팅할 수 없습니다."
               );
-          setIsMinting(false);
-          return;
-        }
+              setIsMinting(false);
+              return;
+            }
           }
         } catch (totalSupplyError) {
           console.log(
@@ -761,27 +714,55 @@ export default function MintPage() {
           console.log(`📝 ${i + 1}/${quantity}번째 NFT 민팅 중...`);
 
           // 직접 prepareContractCall 사용 (tokenURI 전달)
-                      const mintToTransaction = prepareContractCall({
-                        contract: nftContract,
-                        method:
+          const mintToTransaction = prepareContractCall({
+            contract: nftContract,
+            method:
               "function mintTo(address to, string memory uri) returns (uint256)",
-                        params: [connectedAddress, tokenURI],
-                      });
+            params: [connectedAddress, tokenURI],
+          });
 
-                      result = await sendTransaction({
-                        transaction: mintToTransaction,
-                        account,
-                      });
+          result = await sendTransaction({
+            transaction: mintToTransaction,
+            account,
+          });
 
-                        console.log(
+          console.log(
             `✅ ${i + 1}/${quantity}번째 NFT 민팅 성공! Transaction hash:`,
-                          result.transactionHash
-                        );
+            result.transactionHash
+          );
           console.log(`📦 TokenURI: ${tokenURI}`);
         }
 
         console.log(`🎉 총 ${quantity}개의 NFT 민팅 완료!`);
-                          mintSuccess = true;
+        mintSuccess = true;
+
+        // ⚡ 로열티 설정 (ERC-2981 표준)
+        try {
+          const royaltyBps = Math.floor(parseFloat(formData.royalties) * 100); // 5% = 500 bps
+          console.log(
+            `💎 로열티 설정 중... ${formData.royalties}% (${royaltyBps} bps)`
+          );
+
+          const setRoyaltyTx = prepareContractCall({
+            contract: nftContract,
+            method:
+              "function setDefaultRoyaltyInfo(address receiver, uint256 royaltyBps)",
+            params: [connectedAddress, BigInt(royaltyBps)],
+          });
+
+          const royaltyResult = await sendTransaction({
+            transaction: setRoyaltyTx,
+            account,
+          });
+
+          console.log(
+            `✅ 로열티 설정 완료! TX:`,
+            royaltyResult.transactionHash
+          );
+        } catch (royaltyError) {
+          console.log("⚠️ 로열티 설정 실패 (선택사항):", royaltyError);
+          // 로열티 설정 실패해도 민팅은 성공이므로 계속 진행
+        }
       } catch (mintToError) {
         console.error("❌ 민팅 실패:", mintToError);
 
@@ -810,7 +791,7 @@ export default function MintPage() {
           }
         }
 
-                    alert(
+        alert(
           `❌ 민팅 실패!\n\n` +
             `에러: ${errorMessage}${detailedMessage}\n\n` +
             `해결 방법:\n` +
@@ -820,8 +801,8 @@ export default function MintPage() {
             `4. 가스비 충분히 확보`
         );
 
-                    setIsMinting(false);
-                    return;
+        setIsMinting(false);
+        return;
       }
 
       // 민팅 성공 처리
@@ -859,7 +840,7 @@ export default function MintPage() {
         // IPFS URL을 HTTP 게이트웨이로 변환 (Pinata 커스텀 게이트웨이 사용)
         if (imageUrl.startsWith("ipfs://")) {
           const ipfsHash = imageUrl.replace("ipfs://", "");
-          const httpImageUrl = `https://gray-famous-lemming-869.mypinata.cloud/ipfs/${ipfsHash}`;
+          const httpImageUrl = `https://gray-famous-lemming-869.mypinata.cloud/ipfs/${ipfsHash}?pinataGatewayToken=${PINATA_GATEWAY_TOKEN}`;
           successUrl.searchParams.set("nftImage", httpImageUrl);
           console.log("🔗 IPFS 이미지를 HTTP로 변환:", httpImageUrl);
         } else {
@@ -1235,40 +1216,10 @@ export default function MintPage() {
             {/* Pricing & Sale */}
             <div className="bg-white rounded-xl p-6 shadow-sm">
               <h2 className="text-xl font-bold text-black mb-6">
-                Pricing & Sale
+                Minting Options
               </h2>
 
               <div className="space-y-5">
-                {/* Price */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Price (SBMB) <span className="text-red-500">*</span>
-                  </label>
-                  <div className="relative">
-                    <input
-                      type="number"
-                      step="1"
-                      value={formData.price}
-                      onChange={(e) =>
-                        setFormData((prev) => ({
-                          ...prev,
-                          price: e.target.value,
-                        }))
-                      }
-                      placeholder="100"
-                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500 text-black placeholder:text-gray-400"
-                    />
-                    {formData.price && (
-                      <div className="absolute right-4 top-1/2 -translate-y-1/2 text-sm text-gray-500">
-                        {parseFloat(formData.price).toFixed(2)} SBMB
-                      </div>
-                    )}
-                  </div>
-                  <p className="text-xs text-gray-500 mt-2">
-                    Base Sepolia Testnet • SBMB Token
-                  </p>
-                </div>
-
                 {/* Quantity */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -1309,7 +1260,8 @@ export default function MintPage() {
                     <input
                       type="number"
                       min="0"
-                      max="50"
+                      max="10"
+                      step="0.5"
                       value={formData.royalties}
                       onChange={(e) =>
                         setFormData((prev) => ({
@@ -1324,8 +1276,8 @@ export default function MintPage() {
                     </div>
                   </div>
                   <p className="text-xs text-gray-500 mt-2">
-                    You&apos;ll receive {formData.royalties}% of sales if this
-                    item is re-sold
+                    재판매 시 {formData.royalties}%의 로열티를 받습니다 (최대
+                    10%)
                   </p>
                 </div>
               </div>
@@ -1338,14 +1290,12 @@ export default function MintPage() {
                 isMinting ||
                 !formData.name ||
                 !formData.category ||
-                !formData.price ||
                 !formData.file
               }
               className={`w-full py-4 rounded-lg font-semibold text-lg transition-colors flex items-center justify-center space-x-2 ${
                 isMinting ||
                 !formData.name ||
                 !formData.category ||
-                !formData.price ||
                 !formData.file
                   ? "bg-gray-300 text-gray-500 cursor-not-allowed"
                   : "bg-teal-500 text-white hover:bg-teal-600"

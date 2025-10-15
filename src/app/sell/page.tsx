@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { useActiveAccount } from "thirdweb/react";
 import {
@@ -21,8 +21,9 @@ import {
 } from "@/lib/thirdweb";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
+import { convertIPFSUrl } from "@/utils/ipfs";
 
-export default function SellPage() {
+function SellPageContent() {
   const searchParams = useSearchParams();
   const tokenId = searchParams.get("tokenId");
   const account = useActiveAccount();
@@ -198,22 +199,7 @@ export default function SellPage() {
           console.log("🖼️ 메타데이터 이미지:", metadata.image);
 
           if (metadata.image.startsWith("ipfs://")) {
-            const ipfsHash = metadata.image.replace("ipfs://", "");
-            console.log("🖼️ IPFS 해시:", ipfsHash);
-
-            // 여러 게이트웨이 URL 생성
-            imageGateways = [
-              `https://ipfs.io/ipfs/${ipfsHash}`, // thirdweb 기본
-              `https://${ipfsHash}.ipfs.nftstorage.link`, // NFT Storage
-              `https://gray-famous-lemming-869.mypinata.cloud/ipfs/${ipfsHash}`, // Pinata 커스텀
-              `https://gateway.pinata.cloud/ipfs/${ipfsHash}`, // Pinata 공식
-              `https://cloudflare-ipfs.com/ipfs/${ipfsHash}`, // Cloudflare
-            ];
-
-            // 첫 번째 게이트웨이를 기본값으로 사용
-            imageUrl = imageGateways[0];
-            console.log("🖼️ IPFS 이미지 변환:", imageUrl);
-            console.log("🖼️ 사용 가능한 게이트웨이:", imageGateways);
+            imageUrl = convertIPFSUrl(metadata.image); // ⚡ IPFS URL 변환
           } else if (
             metadata.image.startsWith("http://") ||
             metadata.image.startsWith("https://")
@@ -1076,5 +1062,22 @@ export default function SellPage() {
 
       <Footer />
     </div>
+  );
+}
+
+export default function SellPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-500 mx-auto mb-4"></div>
+            <p className="text-gray-600">Loading...</p>
+          </div>
+        </div>
+      }
+    >
+      <SellPageContent />
+    </Suspense>
   );
 }

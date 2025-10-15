@@ -14,6 +14,12 @@ import Footer from "@/components/Footer";
 import Link from "next/link";
 import { client } from "@/lib/wallet";
 import { NFT_CONTRACT_ADDRESS } from "@/lib/thirdweb";
+import { convertIPFSUrl } from "@/utils/ipfs";
+
+// 제외할 NFT 메타데이터 URI 목록
+const EXCLUDED_TOKEN_URIS = [
+  "ipfs://Qme56Ptujbdx9AuaeqAxaNphKPx4QdgQ35ofZkybdzNxmL",
+];
 
 // 여러 NFT 컨트랙트 주소들 (현재는 기본 컨트랙트만 사용)
 const NFT_CONTRACT_ADDRESSES = [
@@ -169,35 +175,35 @@ export default function CollectionPage() {
             console.log(`🔍 연결된 지갑 주소: ${connectedAddress}`);
             console.log(`🔍 체인: ${baseSepolia.name} (${baseSepolia.id})`);
 
-        const nftContract = getContract({
-          client,
-          chain: baseSepolia,
+            const nftContract = getContract({
+              client,
+              chain: baseSepolia,
               address: contractAddress,
-        });
+            });
 
-          // 1. 전체 발행된 NFT 개수 확인 (totalSupply)
+            // 1. 전체 발행된 NFT 개수 확인 (totalSupply)
             console.log(
               `📊 컨트랙트 ${contractAddress} totalSupply 조회 중...`
             );
-          const totalSupply = await readContract({
-            contract: nftContract,
-            method: "function totalSupply() view returns (uint256)",
-            params: [],
-          });
+            const totalSupply = await readContract({
+              contract: nftContract,
+              method: "function totalSupply() view returns (uint256)",
+              params: [],
+            });
             console.log(`📊 totalSupply 결과: ${totalSupply.toString()}`);
 
-          // 2. 실제 소유한 NFT 개수 확인 (balanceOf)
+            // 2. 실제 소유한 NFT 개수 확인 (balanceOf)
             console.log(`📊 컨트랙트 ${contractAddress} balanceOf 조회 중...`);
-          const balance = await readContract({
-            contract: nftContract,
+            const balance = await readContract({
+              contract: nftContract,
               method:
                 "function balanceOf(address owner) view returns (uint256)",
-            params: [connectedAddress],
-          });
+              params: [connectedAddress],
+            });
             console.log(`📊 balanceOf 결과: ${balance.toString()}`);
 
-          const totalMinted = Number(totalSupply);
-          const ownedCount = Number(balance);
+            const totalMinted = Number(totalSupply);
+            const ownedCount = Number(balance);
 
             console.log(`📊 컨트랙트 ${contractAddress} 상태:`, {
               totalSupply: totalSupply.toString(),
@@ -206,14 +212,14 @@ export default function CollectionPage() {
               owned: ownedCount,
             });
 
-          // 실제 소유한 NFT가 있는 경우
-          if (ownedCount > 0) {
+            // 실제 소유한 NFT가 있는 경우
+            if (ownedCount > 0) {
               console.log(
                 `✅ 컨트랙트 ${contractAddress}에서 ${ownedCount}개 NFT 발견`
               );
 
               // 소유한 NFT의 tokenId 조회 및 데이터 구성 (Pinata 전용 + 병렬 처리)
-            console.log(
+              console.log(
                 `🔄 컨트랙트 ${contractAddress}에서 ${ownedCount}개의 NFT 조회 시작...`
               );
 
@@ -222,15 +228,15 @@ export default function CollectionPage() {
                 { length: ownedCount },
                 (_, i) =>
                   readContract({
-                  contract: nftContract,
-                  method:
-                    "function tokenOfOwnerByIndex(address owner, uint256 index) view returns (uint256)",
-                  params: [connectedAddress, BigInt(i)],
+                    contract: nftContract,
+                    method:
+                      "function tokenOfOwnerByIndex(address owner, uint256 index) view returns (uint256)",
+                    params: [connectedAddress, BigInt(i)],
                   })
               );
 
               const tokenIds = await Promise.all(tokenIdPromises);
-                console.log(
+              console.log(
                 `✅ 모든 tokenId 조회 완료:`,
                 tokenIds.map((id) => id.toString())
               );
@@ -238,10 +244,10 @@ export default function CollectionPage() {
               // 2단계: 모든 tokenURI를 병렬로 조회
               const tokenURIPromises = tokenIds.map((tokenId) =>
                 readContract({
-                    contract: nftContract,
-                    method:
-                      "function tokenURI(uint256 tokenId) view returns (string)",
-                    params: [BigInt(Number(tokenId))],
+                  contract: nftContract,
+                  method:
+                    "function tokenURI(uint256 tokenId) view returns (string)",
+                  params: [BigInt(Number(tokenId))],
                 }).catch((error) => {
                   console.log(`📝 NFT #${tokenId} TokenURI 조회 실패:`, error);
                   return "";
@@ -292,20 +298,18 @@ export default function CollectionPage() {
                   if (!tokenURI) {
                     console.log(`❌ NFT #${tokenId} TokenURI가 비어있음`);
                     return null;
-                }
+                  }
 
                   try {
                     if (tokenURI.startsWith("ipfs://")) {
                       const ipfsHash = tokenURI.replace("ipfs://", "");
                       console.log(`📝 NFT #${tokenId} IPFS 해시: ${ipfsHash}`);
 
-                      // 여러 IPFS 게이트웨이 시도 (thirdweb 우선)
+                      // ⚡ 빠른 게이트웨이만 사용
                       const gateways = [
-                        `https://ipfs.io/ipfs/${ipfsHash}`, // thirdweb 기본 게이트웨이
-                        `https://${ipfsHash}.ipfs.nftstorage.link`, // NFT Storage
-                        `https://gray-famous-lemming-869.mypinata.cloud/ipfs/${ipfsHash}`, // Pinata 커스텀
+                        `https://gray-famous-lemming-869.mypinata.cloud/ipfs/${ipfsHash}`, // Pinata 커스텀 (1순위)
                         `https://gateway.pinata.cloud/ipfs/${ipfsHash}`, // Pinata 공식
-                        `https://cloudflare-ipfs.com/ipfs/${ipfsHash}`, // Cloudflare
+                        `https://ipfs.io/ipfs/${ipfsHash}`, // ipfs.io
                       ];
 
                       for (const gateway of gateways) {
@@ -324,7 +328,7 @@ export default function CollectionPage() {
                       return null;
                     } else {
                       // 일반 URL인 경우
-                          console.log(
+                      console.log(
                         `📝 NFT #${tokenId} 일반 URL 시도: ${tokenURI}`
                       );
                       try {
@@ -332,7 +336,7 @@ export default function CollectionPage() {
                         console.log(`✅ NFT #${tokenId} 일반 URL 성공`);
                         return metadata;
                       } catch (urlError) {
-                            console.log(
+                        console.log(
                           `❌ NFT #${tokenId} 일반 URL 실패:`,
                           urlError
                         );
@@ -372,32 +376,27 @@ export default function CollectionPage() {
                 const metadata = metadatas[i];
 
                 console.log(`🔄 NFT #${tokenId} 데이터 구성 시작...`);
-                    console.log(`📝 NFT #${tokenId} 메타데이터:`, metadata);
+                console.log(`📝 NFT #${tokenId} 메타데이터:`, metadata);
 
                 // 이미지 URL 처리 (다중 게이트웨이 지원)
                 let imageUrl = "🎁"; // 기본값
 
                 if (metadata?.image) {
-                    console.log(
+                  console.log(
                     `🖼️ NFT #${tokenId} 메타데이터 이미지:`,
                     metadata.image
                   );
 
                   if (metadata.image.startsWith("ipfs://")) {
-                  const ipfsHash = metadata.image.replace("ipfs://", "");
-                    // 여러 IPFS 게이트웨이 중 첫 번째 사용 (thirdweb 우선)
-                    imageUrl = `https://ipfs.io/ipfs/${ipfsHash}`;
-                  console.log(
-                      `🖼️ NFT #${tokenId} IPFS 이미지 (ipfs.io): ${imageUrl}`
-                  );
-                } else if (
+                    imageUrl = convertIPFSUrl(metadata.image); // ⚡ IPFS URL 변환
+                  } else if (
                     metadata.image.startsWith("http://") ||
                     metadata.image.startsWith("https://")
-                ) {
+                  ) {
                     // HTTP URL인 경우 그대로 사용
-                  imageUrl = metadata.image;
+                    imageUrl = metadata.image;
                     console.log(`🖼️ NFT #${tokenId} HTTP 이미지: ${imageUrl}`);
-                } else {
+                  } else {
                     // 상대 경로나 기타 형식인 경우
                     imageUrl = metadata.image;
                     console.log(`🖼️ NFT #${tokenId} 기타 이미지: ${imageUrl}`);
@@ -464,10 +463,10 @@ export default function CollectionPage() {
                 allOwnedNFTs.push(nftData);
               }
 
-            console.log(
+              console.log(
                 `🎉 컨트랙트 ${contractAddress}에서 ${ownedCount}개 NFT 조회 완료`
-            );
-          } else {
+              );
+            } else {
               console.log(`⚠️ 컨트랙트 ${contractAddress}에서 소유한 NFT 없음`);
             }
           } catch (contractError) {

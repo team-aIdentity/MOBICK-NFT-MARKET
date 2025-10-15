@@ -7,6 +7,7 @@ import { getContract, readContract } from "thirdweb";
 import { baseSepolia } from "thirdweb/chains";
 import { client } from "@/lib/wallet";
 import { NFT_CONTRACT_ADDRESS } from "@/lib/thirdweb";
+import { convertIPFSUrl } from "@/utils/ipfs";
 
 // 안전한 fetch 함수
 const safeFetch = async (
@@ -218,12 +219,7 @@ export default function NFTGrid() {
                 typeof metadata === "object" &&
                 "image" in metadata &&
                 typeof metadata.image === "string"
-                  ? metadata.image.startsWith("ipfs://")
-                    ? `https://ipfs.io/ipfs/${metadata.image.replace(
-                        "ipfs://",
-                        ""
-                      )}`
-                    : metadata.image
+                  ? convertIPFSUrl(metadata.image) // ⚡ IPFS URL 변환
                   : "🎨",
               creator: "춘심이네",
               category: "아트",
