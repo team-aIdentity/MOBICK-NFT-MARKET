@@ -123,7 +123,7 @@ export default function MyNFTDetailPage() {
             const ipfsHash = tokenURIResult.replace("ipfs://", "");
             console.log("📝 IPFS 해시:", ipfsHash);
             urlsToTry = [
-              `https://gray-famous-lemming-869.mypinata.cloud/ipfs/${ipfsHash}`, // ⚡ Pinata 커스텀 (1순위)
+              `https://azure-eldest-ermine-229.mypinata.cloud/ipfs/${ipfsHash}`, // ⚡ Pinata 커스텀 (1순위)
               `https://gateway.pinata.cloud/ipfs/${ipfsHash}`, // Pinata 공식
               `https://ipfs.io/ipfs/${ipfsHash}`, // ipfs.io
             ];

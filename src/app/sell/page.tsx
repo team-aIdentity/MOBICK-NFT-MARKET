@@ -34,6 +34,8 @@ function SellPageContent() {
   const [saleType, setSaleType] = useState<"fixed" | "auction">("fixed");
   const [listingPrice, setListingPrice] = useState("");
   const [listingDuration, setListingDuration] = useState("6");
+  const [existingListing, setExistingListing] = useState<any>(null);
+  const [isCancelling, setIsCancelling] = useState(false);
 
   // 지갑 연결 상태 확인
   useEffect(() => {
@@ -144,7 +146,7 @@ function SellPageContent() {
               urlsToTry = [
                 `https://ipfs.io/ipfs/${ipfsHash}`, // thirdweb 기본
                 `https://${ipfsHash}.ipfs.nftstorage.link`, // NFT Storage
-                `https://gray-famous-lemming-869.mypinata.cloud/ipfs/${ipfsHash}`, // Pinata 커스텀
+                `https://azure-eldest-ermine-229.mypinata.cloud/ipfs/${ipfsHash}`, // Pinata 커스텀
                 `https://gateway.pinata.cloud/ipfs/${ipfsHash}`, // Pinata 공식
                 `https://cloudflare-ipfs.com/ipfs/${ipfsHash}`, // Cloudflare
               ];
@@ -245,6 +247,75 @@ function SellPageContent() {
         };
 
         setNft(nftData);
+
+        // ⚡ 기존 리스팅 확인
+        console.log("🔍 기존 리스팅 확인 중...");
+        const marketplaceContract = getContract({
+          client,
+          chain: baseSepolia,
+          address: MARKETPLACE_CONTRACT_ADDRESS,
+        });
+
+        try {
+          const totalListingsCount = await readContract({
+            contract: marketplaceContract,
+            method: "function totalListings() view returns (uint256)",
+            params: [],
+          });
+
+          console.log("📊 전체 리스팅 개수:", totalListingsCount.toString());
+
+          // 모든 리스팅 확인하여 현재 NFT의 ACTIVE 리스팅 찾기
+          for (let i = 0; i < Number(totalListingsCount); i++) {
+            try {
+              const listing = await readContract({
+                contract: marketplaceContract,
+                method:
+                  "function getListing(uint256) view returns (uint256,uint256,uint256,uint256,uint128,uint128,address,address,address,uint8,uint8,bool)",
+                params: [BigInt(i)],
+              });
+
+              const [
+                _listingId,
+                _tokenId,
+                ,
+                _pricePerToken,
+                ,
+                ,
+                ,
+                _assetContract,
+                ,
+                ,
+                _status,
+              ] = listing;
+
+              // 현재 NFT이고 ACTIVE 상태인 리스팅 찾기
+              if (
+                _status === 1 &&
+                _assetContract.toLowerCase() ===
+                  NFT_CONTRACT_ADDRESS.toLowerCase() &&
+                Number(_tokenId) === Number(tokenId)
+              ) {
+                console.log(
+                  `✅ 기존 ACTIVE 리스팅 발견! listingId=${i}, tokenId=${_tokenId}, price=${(
+                    Number(_pricePerToken) / 1e18
+                  ).toFixed(2)} SBMB`
+                );
+                setExistingListing({
+                  listingId: i,
+                  tokenId: Number(_tokenId),
+                  price: (Number(_pricePerToken) / 1e18).toString(),
+                  status: _status,
+                });
+                break;
+              }
+            } catch (error) {
+              console.log(`리스팅 ${i} 조회 실패:`, error);
+            }
+          }
+        } catch (error) {
+          console.log("⚠️ 리스팅 확인 실패:", error);
+        }
       } catch (error) {
         console.error("NFT 조회 실패:", error);
         alert("NFT 정보를 가져오는데 실패했습니다.");
@@ -256,9 +327,82 @@ function SellPageContent() {
     fetchNFT();
   }, [tokenId, connectedAddress]);
 
+  // 판매 취소 함수
+  const handleCancelListing = async () => {
+    if (!account || !existingListing) {
+      alert("취소할 리스팅이 없습니다.");
+      return;
+    }
+
+    if (
+      !confirm(
+        `정말로 판매를 취소하시겠습니까?\n\n현재 가격: ${existingListing.price} SBMB`
+      )
+    ) {
+      return;
+    }
+
+    setIsCancelling(true);
+    try {
+      console.log("🗑️ 리스팅 취소 시작:", {
+        listingId: existingListing.listingId,
+        tokenId: existingListing.tokenId,
+      });
+
+      const marketplaceContract = getContract({
+        client,
+        chain: baseSepolia,
+        address: MARKETPLACE_CONTRACT_ADDRESS,
+      });
+
+      // cancelListing 트랜잭션 준비
+      const cancelTransaction = prepareContractCall({
+        contract: marketplaceContract,
+        method: "function cancelListing(uint256 listingId)",
+        params: [BigInt(existingListing.listingId)],
+      });
+
+      console.log("✅ 취소 트랜잭션 준비 완료");
+
+      const result = await sendTransaction({
+        transaction: cancelTransaction,
+        account,
+      });
+
+      console.log("✅ 리스팅 취소 완료:", result.transactionHash);
+
+      alert(
+        `🎉 판매가 취소되었습니다!\n\n트랜잭션: ${result.transactionHash}\n\n이제 새로운 가격으로 다시 판매할 수 있습니다.`
+      );
+
+      // 기존 리스팅 정보 초기화
+      setExistingListing(null);
+    } catch (error) {
+      console.error("❌ 리스팅 취소 실패:", error);
+      alert(
+        `판매 취소에 실패했습니다.\n\n오류: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+    } finally {
+      setIsCancelling(false);
+    }
+  };
+
   const handleListForSale = async () => {
     if (!account || !account.address || !nft) {
       alert("지갑을 연결해주세요.");
+      return;
+    }
+
+    // ⚡ 기존 리스팅 확인
+    if (existingListing) {
+      alert(
+        `⚠️ 이 NFT는 이미 판매 중입니다!\n\n` +
+          `현재 가격: ${existingListing.price} SBMB\n\n` +
+          `가격을 변경하려면 먼저 "판매 취소" 버튼을 눌러\n` +
+          `기존 판매를 취소한 후 다시 등록해주세요.`
+      );
       return;
     }
 
@@ -1004,12 +1148,93 @@ function SellPageContent() {
               </p>
             </div>
 
+            {/* 기존 리스팅 정보 표시 */}
+            {existingListing && (
+              <div className="mb-6 p-4 bg-yellow-50 border-2 border-yellow-400 rounded-lg">
+                <div className="flex items-center space-x-2 mb-2">
+                  <svg
+                    className="w-6 h-6 text-yellow-600"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                    />
+                  </svg>
+                  <h3 className="font-bold text-yellow-900">
+                    이미 판매 중입니다
+                  </h3>
+                </div>
+                <p className="text-yellow-800 mb-3">
+                  이 NFT는 현재 <strong>{existingListing.price} SBMB</strong>에
+                  판매 중입니다.
+                  <br />
+                  가격을 변경하려면 먼저 판매를 취소해주세요.
+                </p>
+                <button
+                  onClick={handleCancelListing}
+                  disabled={isCancelling}
+                  className={`w-full py-3 px-4 rounded-lg font-semibold transition-colors flex items-center justify-center space-x-2 ${
+                    isCancelling
+                      ? "bg-gray-300 text-gray-500 cursor-not-allowed"
+                      : "bg-red-500 text-white hover:bg-red-600"
+                  }`}
+                >
+                  {isCancelling ? (
+                    <>
+                      <svg
+                        className="animate-spin h-5 w-5"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                      >
+                        <circle
+                          className="opacity-25"
+                          cx="12"
+                          cy="12"
+                          r="10"
+                          stroke="currentColor"
+                          strokeWidth="4"
+                        ></circle>
+                        <path
+                          className="opacity-75"
+                          fill="currentColor"
+                          d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                        ></path>
+                      </svg>
+                      <span>취소 중...</span>
+                    </>
+                  ) : (
+                    <>
+                      <svg
+                        className="w-5 h-5"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M6 18L18 6M6 6l12 12"
+                        />
+                      </svg>
+                      <span>판매 취소</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            )}
+
             {/* 판매하기 버튼 */}
             <button
               onClick={handleListForSale}
-              disabled={isListing || !listingPrice}
+              disabled={isListing || !listingPrice || !!existingListing}
               className={`w-full py-4 px-6 rounded-lg font-semibold text-lg transition-colors flex items-center justify-center space-x-2 ${
-                isListing || !listingPrice
+                isListing || !listingPrice || !!existingListing
                   ? "bg-gray-300 text-gray-500 cursor-not-allowed"
                   : "bg-teal-500 text-white hover:bg-teal-600"
               }`}
@@ -1052,7 +1277,9 @@ function SellPageContent() {
                       d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"
                     />
                   </svg>
-                  <span>List for Sale</span>
+                  <span>
+                    {existingListing ? "판매 중 (취소 필요)" : "List for Sale"}
+                  </span>
                 </>
               )}
             </button>

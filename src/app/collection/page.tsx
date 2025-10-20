@@ -13,7 +13,10 @@ import Header from "@/components/Header";
 import Footer from "@/components/Footer";
 import Link from "next/link";
 import { client } from "@/lib/wallet";
-import { NFT_CONTRACT_ADDRESS } from "@/lib/thirdweb";
+import {
+  NFT_CONTRACT_ADDRESS,
+  MARKETPLACE_CONTRACT_ADDRESS,
+} from "@/lib/thirdweb";
 import { convertIPFSUrl } from "@/utils/ipfs";
 
 // 제외할 NFT 메타데이터 URI 목록
@@ -32,7 +35,9 @@ export default function CollectionPage() {
   const [connectedAddress, setConnectedAddress] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState("all");
   const [nfts, setNfts] = useState<any[]>([]);
+  const [displayedNFTs, setDisplayedNFTs] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
 
   // 지갑 연결 상태 확인
   useEffect(() => {
@@ -307,7 +312,7 @@ export default function CollectionPage() {
 
                       // ⚡ 빠른 게이트웨이만 사용
                       const gateways = [
-                        `https://gray-famous-lemming-869.mypinata.cloud/ipfs/${ipfsHash}`, // Pinata 커스텀 (1순위)
+                        `https://azure-eldest-ermine-229.mypinata.cloud/ipfs/${ipfsHash}`, // Pinata 커스텀 (1순위)
                         `https://gateway.pinata.cloud/ipfs/${ipfsHash}`, // Pinata 공식
                         `https://ipfs.io/ipfs/${ipfsHash}`, // ipfs.io
                       ];
@@ -364,7 +369,89 @@ export default function CollectionPage() {
                 }))
               );
 
-              // 4단계: NFT 데이터 구성 (개선된 메타데이터 처리)
+              // 4단계: 마켓플레이스에서 ACTIVE 리스팅 확인 (병렬 처리)
+              console.log("🏪 마켓플레이스 리스팅 상태 확인 중...");
+              const marketplaceContract = getContract({
+                client,
+                chain: baseSepolia,
+                address: MARKETPLACE_CONTRACT_ADDRESS,
+              });
+
+              const totalListingsCount = await readContract({
+                contract: marketplaceContract,
+                method: "function totalListings() view returns (uint256)",
+                params: [],
+              });
+
+              console.log(
+                "📊 전체 리스팅 개수:",
+                totalListingsCount.toString()
+              );
+
+              // 리스팅 상태를 tokenId로 매핑 (병렬 조회)
+              const listingStatusMap = new Map<
+                number,
+                { price: string; listingId: number }
+              >();
+
+              const listingPromises = [];
+              for (
+                let i = 0;
+                i < Math.min(Number(totalListingsCount), 50);
+                i++
+              ) {
+                listingPromises.push(
+                  readContract({
+                    contract: marketplaceContract,
+                    method:
+                      "function getListing(uint256) view returns (uint256,uint256,uint256,uint256,uint128,uint128,address,address,address,uint8,uint8,bool)",
+                    params: [BigInt(i)],
+                  })
+                    .then((listing) => {
+                      const [
+                        _listingId,
+                        _tokenId,
+                        ,
+                        _pricePerToken,
+                        ,
+                        ,
+                        ,
+                        _assetContract,
+                        ,
+                        ,
+                        _status,
+                      ] = listing;
+
+                      // ACTIVE 상태이고 현재 컨트랙트의 NFT인 경우
+                      if (
+                        _status === 1 &&
+                        _assetContract.toLowerCase() ===
+                          contractAddress.toLowerCase()
+                      ) {
+                        const price = (
+                          Number(_pricePerToken) / 1e18
+                        ).toString();
+                        listingStatusMap.set(Number(_tokenId), {
+                          price,
+                          listingId: i,
+                        });
+                        console.log(
+                          `📋 리스팅 ${i}: tokenId=${_tokenId}, price=${price} SBMB, status=ACTIVE`
+                        );
+                      }
+                    })
+                    .catch(() => {
+                      // 리스팅 조회 실패는 무시
+                    })
+                );
+              }
+
+              await Promise.all(listingPromises);
+              console.log(
+                `✅ 리스팅 상태 확인 완료, ${listingStatusMap.size}개 ACTIVE 리스팅 발견`
+              );
+
+              // 5단계: NFT 데이터 구성
               const categoryIcons = {
                 art: "🎨",
                 utility: "🔧",
@@ -413,19 +500,19 @@ export default function CollectionPage() {
                   );
                 }
 
-                // Marketplace 판매 정보 확인
+                // ⚡ 리스팅 상태 확인
+                const listingInfo = listingStatusMap.get(Number(tokenId));
                 let listingPrice = "0";
                 let isListed = false;
-                try {
-                  const listingKey = `listing_${tokenId}`;
-                  const storedListing = localStorage.getItem(listingKey);
-                  if (storedListing) {
-                    const listing = JSON.parse(storedListing);
-                    listingPrice = listing.price;
-                    isListed = true;
-                  }
-                } catch (err) {
-                  console.log(`NFT #${tokenId} 판매 정보 조회 실패:`, err);
+
+                if (listingInfo) {
+                  listingPrice = listingInfo.price;
+                  isListed = true;
+                  console.log(
+                    `✅ NFT #${tokenId} 판매 중: ${listingPrice} SBMB (listingId=${listingInfo.listingId})`
+                  );
+                } else {
+                  console.log(`📝 NFT #${tokenId} 판매 안 함`);
                 }
 
                 const nftData = {
@@ -496,10 +583,13 @@ export default function CollectionPage() {
         );
         console.log("📋 최종 소유한 NFT 목록:", allOwnedNFTs);
         setNfts(allOwnedNFTs);
+        // 초기 4개만 표시
+        setDisplayedNFTs(allOwnedNFTs.slice(0, 4));
         console.log("✅ 모든 NFT 데이터 설정 완료");
       } catch (error) {
         console.log("NFT 조회 실패:", error);
         setNfts([]);
+        setDisplayedNFTs([]);
       } finally {
         setIsLoading(false);
       }
@@ -507,6 +597,18 @@ export default function CollectionPage() {
 
     fetchNFTs();
   }, [connectedAddress]);
+
+  // Load More 버튼 핸들러
+  const handleLoadMore = () => {
+    setIsLoadingMore(true);
+    const currentCount = displayedNFTs.length;
+    const nextBatch = nfts.slice(currentCount, currentCount + 4);
+    setDisplayedNFTs([...displayedNFTs, ...nextBatch]);
+    setIsLoadingMore(false);
+  };
+
+  // 더 로드할 NFT가 있는지 확인
+  const hasMoreNFTs = displayedNFTs.length < nfts.length;
 
   if (!connectedAddress) {
     return (
@@ -616,7 +718,7 @@ export default function CollectionPage() {
         </div>
 
         {/* NFT 그리드 */}
-        {nfts.length === 0 ? (
+        {displayedNFTs.length === 0 ? (
           <div className="text-center py-20">
             <div className="text-6xl mb-4">🎨</div>
             <h3 className="text-xl font-semibold text-gray-900 mb-2">
@@ -644,289 +746,367 @@ export default function CollectionPage() {
             </Link>
           </div>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-            {nfts.map((nft) => (
-              <Link
-                key={`${nft.contractAddress}-${nft.id}`}
-                href={`/my-nft/${nft.tokenId}?contract=${nft.contractAddress}`}
-                className="group bg-white rounded-2xl shadow-sm overflow-hidden hover:shadow-lg transition-shadow"
-                onClick={() => {
-                  console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-                  console.log("🔍 NFT 클릭!");
-                  console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-                  console.log("📋 NFT ID:", nft.id);
-                  console.log("📋 Token ID:", nft.tokenId);
-                  console.log("📝 Name:", nft.name);
-                  console.log("📝 Contract:", nft.contractAddress);
-                  console.log(
-                    "🔗 Href:",
-                    `/my-nft/${nft.tokenId}?contract=${nft.contractAddress}`
-                  );
-                  console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-                }}
-              >
-                <div className="aspect-square bg-white border border-gray-200 flex items-center justify-center relative overflow-hidden">
-                  {nft.image && nft.image.startsWith("http") ? (
-                    <img
-                      src={nft.image}
-                      alt={nft.name}
-                      className="w-full h-full object-cover"
-                      onLoad={() => {
-                        console.log(`✅ 이미지 로드 성공: ${nft.image}`);
+          <>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+              {displayedNFTs.map((nft) => (
+                <Link
+                  key={`${nft.contractAddress}-${nft.id}`}
+                  href={`/my-nft/${nft.tokenId}?contract=${nft.contractAddress}`}
+                  className="group bg-white rounded-2xl shadow-sm overflow-hidden hover:shadow-lg transition-shadow"
+                  onClick={() => {
+                    console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+                    console.log("🔍 NFT 클릭!");
+                    console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+                    console.log("📋 NFT ID:", nft.id);
+                    console.log("📋 Token ID:", nft.tokenId);
+                    console.log("📝 Name:", nft.name);
+                    console.log("📝 Contract:", nft.contractAddress);
+                    console.log(
+                      "🔗 Href:",
+                      `/my-nft/${nft.tokenId}?contract=${nft.contractAddress}`
+                    );
+                    console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+                  }}
+                >
+                  <div className="aspect-square bg-white border border-gray-200 flex items-center justify-center relative overflow-hidden">
+                    {nft.image && nft.image.startsWith("http") ? (
+                      <img
+                        src={nft.image}
+                        alt={nft.name}
+                        className="w-full h-full object-cover"
+                        onLoad={() => {
+                          console.log(`✅ 이미지 로드 성공: ${nft.image}`);
+                        }}
+                        onError={(e) => {
+                          console.log(`❌ 이미지 로드 실패: ${nft.image}`);
+                          e.currentTarget.style.display = "none";
+                          e.currentTarget.nextElementSibling.style.display =
+                            "flex";
+                        }}
+                      />
+                    ) : null}
+                    <div
+                      className="text-6xl absolute inset-0 flex items-center justify-center bg-gray-100"
+                      style={{
+                        display:
+                          nft.image && nft.image.startsWith("http")
+                            ? "none"
+                            : "flex",
                       }}
-                      onError={(e) => {
-                        console.log(`❌ 이미지 로드 실패: ${nft.image}`);
-                        e.currentTarget.style.display = "none";
-                        e.currentTarget.nextElementSibling.style.display =
-                          "flex";
-                      }}
-                    />
-                  ) : null}
-                  <div
-                    className="text-6xl absolute inset-0 flex items-center justify-center bg-gray-100"
-                    style={{
-                      display:
-                        nft.image && nft.image.startsWith("http")
-                          ? "none"
-                          : "flex",
-                    }}
-                  >
-                    {nft.image}
-                  </div>
-                </div>
-                <div className="p-6">
-                  <div className="flex items-center justify-between mb-2">
-                    <div className="flex-1">
-                      <h3 className="text-lg font-semibold text-gray-900 truncate">
-                        {nft.name}
-                      </h3>
-                      {nft.isListed && (
-                        <span className="inline-block mt-1 px-2 py-1 bg-green-100 text-green-700 text-xs font-semibold rounded-full">
-                          판매 중
-                        </span>
-                      )}
+                    >
+                      {nft.image}
                     </div>
-                    <div className="relative">
-                      <button
-                        onClick={(e) => {
-                          e.preventDefault();
-                          e.stopPropagation();
-
-                          // 다른 모든 메뉴 닫기
-                          document
-                            .querySelectorAll('[id^="nft-menu-"]')
-                            .forEach((menu) => {
-                              if (menu.id !== `nft-menu-${nft.id}`) {
-                                menu.classList.add("hidden");
-                              }
-                            });
-
-                          // 현재 메뉴 토글
-                          const menu = document.getElementById(
-                            `nft-menu-${nft.id}`
-                          );
-                          if (menu) {
-                            const isHidden = menu.classList.contains("hidden");
-
-                            if (isHidden) {
-                              // 메뉴 위치 계산
-                              const buttonRect =
-                                e.currentTarget.getBoundingClientRect();
-                              const menuWidth = 160; // min-w-[160px]
-                              const menuHeight = 80; // 예상 높이
-
-                              let left = buttonRect.right - menuWidth;
-                              let top = buttonRect.bottom + 4;
-
-                              // 화면 오른쪽 경계 체크
-                              if (left < 10) {
-                                left = buttonRect.left - menuWidth;
-                              }
-
-                              // 화면 아래쪽 경계 체크
-                              if (top + menuHeight > window.innerHeight - 10) {
-                                top = buttonRect.top - menuHeight - 4;
-                              }
-
-                              menu.style.left = `${left}px`;
-                              menu.style.top = `${top}px`;
-                              menu.classList.remove("hidden");
-                            } else {
-                              menu.classList.add("hidden");
-                            }
-                          }
-                        }}
-                        className="text-gray-400 hover:text-gray-600 relative z-10"
-                      >
-                        <svg
-                          className="w-5 h-5"
-                          fill="currentColor"
-                          viewBox="0 0 20 20"
-                        >
-                          <path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z" />
-                        </svg>
-                      </button>
-
-                      {/* 더보기 메뉴 */}
-                      <div
-                        id={`nft-menu-${nft.id}`}
-                        className="hidden fixed bg-white border border-gray-200 rounded-lg shadow-2xl py-2 min-w-[160px]"
-                        style={{
-                          zIndex: 9999,
-                          position: "fixed",
-                        }}
-                      >
-                        <button
-                          onClick={(e) => {
-                            e.preventDefault();
-                            console.log("🔗 판매 페이지로 이동:", {
-                              nftId: nft.id,
-                              tokenId: nft.tokenId,
-                              nftName: nft.name,
-                            });
-                            window.location.href = `/sell?tokenId=${
-                              nft.tokenId || nft.id
-                            }`;
-                          }}
-                          className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center space-x-2"
-                        >
-                          <svg
-                            className="w-4 h-4"
-                            fill="none"
-                            stroke="currentColor"
-                            viewBox="0 0 24 24"
-                          >
-                            <path
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              strokeWidth={2}
-                              d="M7 4V2a1 1 0 011-1h8a1 1 0 011 1v2m0 0V1a1 1 0 011 1v18a1 1 0 01-1 1H6a1 1 0 01-1-1V2a1 1 0 011-1h8z"
-                            />
-                          </svg>
-                          <span>판매하기</span>
-                        </button>
+                  </div>
+                  <div className="p-6">
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex-1">
+                        <h3 className="text-lg font-semibold text-gray-900 truncate">
+                          {nft.name}
+                        </h3>
+                        {nft.isListed && (
+                          <span className="inline-block mt-1 px-2 py-1 bg-green-100 text-green-700 text-xs font-semibold rounded-full">
+                            판매 중
+                          </span>
+                        )}
+                      </div>
+                      <div className="relative">
                         <button
                           onClick={(e) => {
                             e.preventDefault();
                             e.stopPropagation();
-                            // 전송하기 기능 구현
-                            const recipientAddress =
-                              prompt("받을 주소를 입력하세요:");
-                            if (recipientAddress) {
-                              handleTransfer(nft.tokenId, recipientAddress);
+
+                            // 다른 모든 메뉴 닫기
+                            document
+                              .querySelectorAll('[id^="nft-menu-"]')
+                              .forEach((menu) => {
+                                if (menu.id !== `nft-menu-${nft.id}`) {
+                                  menu.classList.add("hidden");
+                                }
+                              });
+
+                            // 현재 메뉴 토글
+                            const menu = document.getElementById(
+                              `nft-menu-${nft.id}`
+                            );
+                            if (menu) {
+                              const isHidden =
+                                menu.classList.contains("hidden");
+
+                              if (isHidden) {
+                                // 메뉴 위치 계산
+                                const buttonRect =
+                                  e.currentTarget.getBoundingClientRect();
+                                const menuWidth = 160; // min-w-[160px]
+                                const menuHeight = 80; // 예상 높이
+
+                                let left = buttonRect.right - menuWidth;
+                                let top = buttonRect.bottom + 4;
+
+                                // 화면 오른쪽 경계 체크
+                                if (left < 10) {
+                                  left = buttonRect.left - menuWidth;
+                                }
+
+                                // 화면 아래쪽 경계 체크
+                                if (
+                                  top + menuHeight >
+                                  window.innerHeight - 10
+                                ) {
+                                  top = buttonRect.top - menuHeight - 4;
+                                }
+
+                                menu.style.left = `${left}px`;
+                                menu.style.top = `${top}px`;
+                                menu.classList.remove("hidden");
+                              } else {
+                                menu.classList.add("hidden");
+                              }
                             }
                           }}
-                          className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center space-x-2"
+                          className="text-gray-400 hover:text-gray-600 relative z-10"
                         >
                           <svg
-                            className="w-4 h-4"
-                            fill="none"
-                            stroke="currentColor"
-                            viewBox="0 0 24 24"
+                            className="w-5 h-5"
+                            fill="currentColor"
+                            viewBox="0 0 20 20"
                           >
-                            <path
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              strokeWidth={2}
-                              d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"
-                            />
+                            <path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z" />
                           </svg>
-                          <span>전송하기</span>
                         </button>
-                        <button
-                          onClick={(e) => {
-                            e.preventDefault();
-                            const contractAddress = NFT_CONTRACT_ADDRESS;
-                            navigator.clipboard.writeText(contractAddress);
-                            alert(
-                              `NFT 컨트랙트 주소가 복사되었습니다!\n${contractAddress}`
-                            );
+
+                        {/* 더보기 메뉴 */}
+                        <div
+                          id={`nft-menu-${nft.id}`}
+                          className="hidden fixed bg-white border border-gray-200 rounded-lg shadow-2xl py-2 min-w-[160px]"
+                          style={{
+                            zIndex: 9999,
+                            position: "fixed",
                           }}
-                          className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center space-x-2"
                         >
-                          <svg
-                            className="w-4 h-4"
-                            fill="none"
-                            stroke="currentColor"
-                            viewBox="0 0 24 24"
+                          <button
+                            onClick={(e) => {
+                              e.preventDefault();
+                              console.log("🔗 판매 페이지로 이동:", {
+                                nftId: nft.id,
+                                tokenId: nft.tokenId,
+                                nftName: nft.name,
+                                isListed: nft.isListed,
+                              });
+                              window.location.href = `/sell?tokenId=${
+                                nft.tokenId || nft.id
+                              }`;
+                            }}
+                            className={`w-full px-4 py-2 text-left text-sm hover:bg-gray-50 flex items-center space-x-2 ${
+                              nft.isListed
+                                ? "text-red-600 font-medium"
+                                : "text-gray-700"
+                            }`}
                           >
-                            <path
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              strokeWidth={2}
-                              d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
-                            />
-                          </svg>
-                          <span>컨트랙트 주소 복사</span>
-                        </button>
+                            <svg
+                              className="w-4 h-4"
+                              fill="none"
+                              stroke="currentColor"
+                              viewBox="0 0 24 24"
+                            >
+                              {nft.isListed ? (
+                                <path
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  strokeWidth={2}
+                                  d="M6 18L18 6M6 6l12 12"
+                                />
+                              ) : (
+                                <path
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  strokeWidth={2}
+                                  d="M7 4V2a1 1 0 011-1h8a1 1 0 011 1v2m0 0V1a1 1 0 011 1v18a1 1 0 01-1 1H6a1 1 0 01-1-1V2a1 1 0 011-1h8z"
+                                />
+                              )}
+                            </svg>
+                            <span>
+                              {nft.isListed ? "판매 취소" : "판매하기"}
+                            </span>
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              // 전송하기 기능 구현
+                              const recipientAddress =
+                                prompt("받을 주소를 입력하세요:");
+                              if (recipientAddress) {
+                                handleTransfer(nft.tokenId, recipientAddress);
+                              }
+                            }}
+                            className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center space-x-2"
+                          >
+                            <svg
+                              className="w-4 h-4"
+                              fill="none"
+                              stroke="currentColor"
+                              viewBox="0 0 24 24"
+                            >
+                              <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth={2}
+                                d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"
+                              />
+                            </svg>
+                            <span>전송하기</span>
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.preventDefault();
+                              const contractAddress = NFT_CONTRACT_ADDRESS;
+                              navigator.clipboard.writeText(contractAddress);
+                              alert(
+                                `NFT 컨트랙트 주소가 복사되었습니다!\n${contractAddress}`
+                              );
+                            }}
+                            className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center space-x-2"
+                          >
+                            <svg
+                              className="w-4 h-4"
+                              fill="none"
+                              stroke="currentColor"
+                              viewBox="0 0 24 24"
+                            >
+                              <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth={2}
+                                d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
+                              />
+                            </svg>
+                            <span>컨트랙트 주소 복사</span>
+                          </button>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                  <p className="text-sm text-gray-600 mb-4">{nft.collection}</p>
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-xs text-gray-500">Price</p>
-                      <p className="text-sm font-bold text-gray-900">
-                        {nft.price}
-                      </p>
+                    <p className="text-sm text-gray-600 mb-4">
+                      {nft.collection}
+                    </p>
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-xs text-gray-500">Price</p>
+                        <p className="text-sm font-bold text-gray-900">
+                          {nft.price}
+                        </p>
+                      </div>
+                      {nft.needsClaim && (
+                        <button
+                          onClick={async (e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+
+                            try {
+                              const nftContract = getContract({
+                                client,
+                                chain: baseSepolia,
+                                address: NFT_CONTRACT_ADDRESS,
+                              });
+
+                              const claimTransaction = prepareContractCall({
+                                contract: nftContract,
+                                method:
+                                  "function claim(address _receiver, uint256 _quantity) payable",
+                                params: [connectedAddress, BigInt(1)],
+                                value: BigInt(0),
+                              });
+
+                              const result = await sendTransaction({
+                                transaction: claimTransaction,
+                                account: account!,
+                              });
+
+                              console.log(
+                                "✅ Claim 성공! Transaction hash:",
+                                result.transactionHash
+                              );
+                              alert(
+                                `🎉 NFT가 성공적으로 claim되었습니다!\n\nTx: ${result.transactionHash}`
+                              );
+
+                              // 페이지 새로고침
+                              window.location.reload();
+                            } catch (error) {
+                              console.error("❌ Claim 실패:", error);
+                              alert(
+                                `Claim 실패: ${
+                                  error instanceof Error
+                                    ? error.message
+                                    : String(error)
+                                }`
+                              );
+                            }
+                          }}
+                          className="px-3 py-1 bg-teal-500 text-white text-xs rounded-lg hover:bg-teal-600 transition-colors"
+                        >
+                          Claim
+                        </button>
+                      )}
                     </div>
-                    {nft.needsClaim && (
-                      <button
-                        onClick={async (e) => {
-                          e.preventDefault();
-                          e.stopPropagation();
-
-                          try {
-                            const nftContract = getContract({
-                              client,
-                              chain: baseSepolia,
-                              address: NFT_CONTRACT_ADDRESS,
-                            });
-
-                            const claimTransaction = prepareContractCall({
-                              contract: nftContract,
-                              method:
-                                "function claim(address _receiver, uint256 _quantity) payable",
-                              params: [connectedAddress, BigInt(1)],
-                              value: BigInt(0),
-                            });
-
-                            const result = await sendTransaction({
-                              transaction: claimTransaction,
-                              account: account!,
-                            });
-
-                            console.log(
-                              "✅ Claim 성공! Transaction hash:",
-                              result.transactionHash
-                            );
-                            alert(
-                              `🎉 NFT가 성공적으로 claim되었습니다!\n\nTx: ${result.transactionHash}`
-                            );
-
-                            // 페이지 새로고침
-                            window.location.reload();
-                          } catch (error) {
-                            console.error("❌ Claim 실패:", error);
-                            alert(
-                              `Claim 실패: ${
-                                error instanceof Error
-                                  ? error.message
-                                  : String(error)
-                              }`
-                            );
-                          }
-                        }}
-                        className="px-3 py-1 bg-teal-500 text-white text-xs rounded-lg hover:bg-teal-600 transition-colors"
-                      >
-                        Claim
-                      </button>
-                    )}
                   </div>
-                </div>
-              </Link>
-            ))}
-          </div>
+                </Link>
+              ))}
+            </div>
+
+            {/* Load More 버튼 */}
+            {hasMoreNFTs && (
+              <div className="text-center mt-8">
+                <button
+                  onClick={handleLoadMore}
+                  disabled={isLoadingMore}
+                  className="border-2 border-teal-500 text-teal-500 px-8 py-3 rounded-lg font-semibold hover:bg-teal-50 transition-colors inline-flex items-center disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {isLoadingMore ? (
+                    <>
+                      <svg
+                        className="animate-spin h-5 w-5 mr-2"
+                        xmlns="http://www.w3.org/2000/svg"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                      >
+                        <circle
+                          className="opacity-25"
+                          cx="12"
+                          cy="12"
+                          r="10"
+                          stroke="currentColor"
+                          strokeWidth="4"
+                        ></circle>
+                        <path
+                          className="opacity-75"
+                          fill="currentColor"
+                          d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                        ></path>
+                      </svg>
+                      Loading...
+                    </>
+                  ) : (
+                    <>
+                      Load More NFTs
+                      <svg
+                        className="w-5 h-5 ml-2"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M19 9l-7 7-7-7"
+                        />
+                      </svg>
+                    </>
+                  )}
+                </button>
+              </div>
+            )}
+          </>
         )}
       </main>
 

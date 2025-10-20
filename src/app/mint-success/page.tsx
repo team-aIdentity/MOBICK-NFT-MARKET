@@ -36,8 +36,11 @@ function MintSuccessContent() {
 
     if (tokenId && txHash) {
       // ⚡ 이미지 URL 처리 (이미 HTTP로 변환되어 전달됨)
-      const finalImage = nftImage || categoryIcons[category as keyof typeof categoryIcons] || "🎨";
-      
+      const finalImage =
+        nftImage ||
+        categoryIcons[category as keyof typeof categoryIcons] ||
+        "🎨";
+
       console.log("🖼️ 민팅 성공 페이지 이미지:", finalImage);
 
       setNftData({
@@ -56,7 +59,7 @@ function MintSuccessContent() {
       setTransactionData({
         txHash,
         contractAddress: contractAddress || "0x8f4a2b...8e2c5f",
-        gasFee: gasFee || "0.008 SBMB",
+        gasFee: gasFee || "0.008 ETH",
         blockNumber: blockNumber || "#18,543,892",
         confirmations: confirmations || "12 confirmations",
         mintedAt: stableMintedAt,
@@ -190,7 +193,7 @@ function MintSuccessContent() {
                   <div className="flex justify-between">
                     <span className="text-black">Gas Fee Paid</span>
                     <span className="font-medium">
-                      {transactionData?.gasFee || "0.008 SBMB"}
+                      {transactionData?.gasFee || "0.008 ETH"}
                     </span>
                   </div>
                 </div>

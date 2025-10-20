@@ -43,6 +43,7 @@ export default function NFTDetailPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isPurchasing, setIsPurchasing] = useState(false);
+  const [isCancelling, setIsCancelling] = useState(false);
 
   // ⚡️ 극한 최적화: 2초 타임아웃
   const safeFetch = async (
@@ -72,17 +73,6 @@ export default function NFTDetailPage() {
     }
   };
 
-  // IPFS URL을 HTTP URL로 변환
-  const convertIPFSUrl = (ipfsUrl: string): string => {
-    if (!ipfsUrl) return "";
-    if (ipfsUrl.startsWith("ipfs://")) {
-      const hash = ipfsUrl.replace("ipfs://", "");
-      // 커스텀 Pinata 게이트웨이 우선 사용
-      return `https://gray-famous-lemming-869.mypinata.cloud/ipfs/${hash}`;
-    }
-    return ipfsUrl;
-  };
-
   // NFT 구매 함수
   const handlePurchase = async () => {
     if (!nftData || !account || !nftData.price) {
@@ -94,16 +84,44 @@ export default function NFTDetailPage() {
       setIsPurchasing(true);
       console.log("🛒 NFT 구매 시작:", nftData.tokenId, nftData.price);
 
-      // 1. ERC20 토큰 승인 확인
+      // 1. 구매자 잔액 확인
       const priceInWei = BigInt(Math.floor(parseFloat(nftData.price) * 1e18));
       console.log("💰 구매 가격 (Wei):", priceInWei.toString());
 
+      const balance = await readContract({
+        contract: PAY_TOKEN_CONTRACT,
+        method: "function balanceOf(address) view returns (uint256)",
+        params: [account.address],
+      });
+
+      console.log(
+        "💵 구매자 SBMB 잔액:",
+        (Number(balance) / 1e18).toFixed(2),
+        "SBMB"
+      );
+
+      if (balance < priceInWei) {
+        alert(
+          `❌ SBMB 토큰이 부족합니다!\n\n` +
+            `필요: ${nftData.price} SBMB\n` +
+            `보유: ${(Number(balance) / 1e18).toFixed(2)} SBMB\n\n` +
+            `SBMB 토큰을 충전해주세요.`
+        );
+        setIsPurchasing(false);
+        return;
+      }
+
+      // 2. ERC20 토큰 승인 확인
       const allowance = await readContract({
         contract: PAY_TOKEN_CONTRACT,
         method: "function allowance(address,address) view returns (uint256)",
         params: [account.address, MARKETPLACE_CONTRACT.address],
       });
-      console.log("🔐 현재 승인 금액:", allowance.toString());
+      console.log(
+        "🔐 현재 승인 금액:",
+        (Number(allowance) / 1e18).toFixed(2),
+        "SBMB"
+      );
 
       // 2. 승인 금액이 부족한 경우 승인 요청
       if (allowance < priceInWei) {
@@ -160,13 +178,15 @@ export default function NFTDetailPage() {
       console.log("✅ 구매 트랜잭션:", purchaseResult.transactionHash);
       console.log("🎉 NFT 구매 완료!");
 
-      // 4. 성공 알림 및 페이지 새로고침
+      // 4. 성공 알림 및 컬렉션 페이지로 이동
       alert(
-        `🎉 NFT 구매가 완료되었습니다!\n트랜잭션: ${purchaseResult.transactionHash}`
+        `🎉 NFT 구매가 완료되었습니다!\n\n` +
+          `트랜잭션: ${purchaseResult.transactionHash}\n\n` +
+          `내 컬렉션 페이지로 이동합니다...`
       );
 
-      // NFT 데이터 새로고침
-      window.location.reload();
+      // 컬렉션 페이지로 리다이렉트 (구매한 NFT 확인)
+      window.location.href = "/collection";
     } catch (error) {
       console.error("❌ NFT 구매 실패:", error);
 
@@ -186,6 +206,58 @@ export default function NFTDetailPage() {
       alert(`❌ 구매 실패\n${errorMessage}`);
     } finally {
       setIsPurchasing(false);
+    }
+  };
+
+  // 리스팅 취소 함수
+  const handleCancelListing = async () => {
+    if (!nftData || !account || !nftData.listingId) {
+      alert("취소할 리스팅 정보가 없습니다.");
+      return;
+    }
+
+    if (
+      !confirm(
+        `정말로 판매를 취소하시겠습니까?\n\n현재 가격: ${nftData.price} SBMB`
+      )
+    ) {
+      return;
+    }
+
+    setIsCancelling(true);
+    try {
+      console.log("🗑️ 리스팅 취소 시작:", {
+        listingId: nftData.listingId,
+        tokenId: nftData.tokenId,
+      });
+
+      const cancelTransaction = prepareContractCall({
+        contract: MARKETPLACE_CONTRACT,
+        method: "function cancelListing(uint256 listingId)",
+        params: [BigInt(nftData.listingId)],
+      });
+
+      const result = await sendTransaction({
+        transaction: cancelTransaction,
+        account,
+      });
+
+      console.log("✅ 리스팅 취소 완료:", result.transactionHash);
+
+      alert(
+        `🎉 판매가 취소되었습니다!\n\n트랜잭션: ${result.transactionHash}\n\n컬렉션 페이지로 이동합니다...`
+      );
+
+      window.location.href = "/collection";
+    } catch (error) {
+      console.error("❌ 리스팅 취소 실패:", error);
+      alert(
+        `판매 취소에 실패했습니다.\n\n오류: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+    } finally {
+      setIsCancelling(false);
     }
   };
 
@@ -225,7 +297,7 @@ export default function NFTDetailPage() {
           const ipfsHash = tokenURIResult.replace("ipfs://", "");
           // ⚡️ 가장 빠른 게이트웨이 3개만 (우선순위 순)
           urlsToTry.push(
-            `https://gray-famous-lemming-869.mypinata.cloud/ipfs/${ipfsHash}`, // 1순위: 커스텀
+            `https://azure-eldest-ermine-229.mypinata.cloud/ipfs/${ipfsHash}`, // 1순위: 커스텀
             `https://gateway.pinata.cloud/ipfs/${ipfsHash}`, // 2순위
             `https://ipfs.io/ipfs/${ipfsHash}` // 3순위
           );
@@ -281,6 +353,7 @@ export default function NFTDetailPage() {
         let price: string | undefined;
         let isListed = false;
         let listingId: string | undefined;
+        let sellerAddress = owner; // 기본값은 현재 소유자
 
         try {
           // totalListings로 개수 확인 후 개별 조회
@@ -290,8 +363,8 @@ export default function NFTDetailPage() {
             params: [],
           });
 
-          // ⚡️ 극한 최적화: 최대 5개만 조회
-          const maxListings = Math.min(Number(totalListingsCount), 5);
+          // ⚡️ 리스팅 조회 개수 증가 (100개까지)
+          const maxListings = Math.min(Number(totalListingsCount), 100);
 
           const listingPromises = [];
           for (let i = 0; i < maxListings; i++) {
@@ -344,22 +417,44 @@ export default function NFTDetailPage() {
               ,
               ,
               _assetContract,
-              ,
+              _tokenOwner,
               ,
               _status,
             ] = result.listing;
 
-            // 현재 NFT와 일치하는지 확인
+            console.log(
+              `📋 리스팅 ${result.index}: tokenId=${_tokenId}, status=${_status}, ` +
+                `seller=${_tokenOwner.slice(0, 10)}..., ` +
+                `매칭=${
+                  _tokenId.toString() === tokenId &&
+                  _assetContract.toLowerCase() ===
+                    NFT_CONTRACT.address.toLowerCase()
+                }`
+            );
+
+            // 현재 NFT와 일치하는지 확인 + ACTIVE 상태만
             if (
               _tokenId.toString() === tokenId &&
               _assetContract.toLowerCase() ===
                 NFT_CONTRACT.address.toLowerCase() &&
-              _status === 1 // ACTIVE
+              _status === 1 // 1 = ACTIVE, 2 = COMPLETED, 3 = CANCELLED
             ) {
               listingId = _listingId.toString();
               price = (Number(_pricePerToken) / 1e18).toString();
               isListed = true;
+              sellerAddress = _tokenOwner; // ⚡ 판매자 주소 저장
+              console.log(
+                `✅ ACTIVE 리스팅 발견! ID=${listingId}, 가격=${price} SBMB, seller=${sellerAddress}`
+              );
               break;
+            } else if (
+              _tokenId.toString() === tokenId &&
+              _assetContract.toLowerCase() ===
+                NFT_CONTRACT.address.toLowerCase()
+            ) {
+              console.log(
+                `⚠️ 리스팅 발견했으나 상태가 ACTIVE 아님: status=${_status}`
+              );
             }
           }
           // 🚀 리스팅 정보가 있으면 NFT 데이터 업데이트
@@ -369,6 +464,7 @@ export default function NFTDetailPage() {
               price,
               isListed,
               listingId,
+              creator: sellerAddress, // ⚡ 판매자 주소 업데이트
             }));
           }
         } catch {
@@ -591,6 +687,15 @@ export default function NFTDetailPage() {
                       {nftData.owner.slice(0, 6)}...{nftData.owner.slice(-4)}
                     </span>
                   </div>
+                  {nftData.isListed && nftData.creator !== nftData.owner && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-gray-600">Seller</span>
+                      <span className="font-mono text-sm bg-teal-100 px-2 py-1 rounded text-teal-700">
+                        {nftData.creator.slice(0, 6)}...
+                        {nftData.creator.slice(-4)}
+                      </span>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -646,7 +751,12 @@ export default function NFTDetailPage() {
                 {isOwner ? (
                   <>
                     {!nftData.isListed ? (
-                      <button className="flex-1 bg-green-500 text-white px-6 py-3 rounded-xl hover:bg-green-600 transition-colors flex items-center justify-center gap-2">
+                      <button
+                        onClick={() => {
+                          window.location.href = `/sell?tokenId=${nftData.tokenId}`;
+                        }}
+                        className="flex-1 bg-green-500 text-white px-6 py-3 rounded-xl hover:bg-green-600 transition-colors flex items-center justify-center gap-2"
+                      >
                         <svg
                           className="w-5 h-5"
                           fill="none"
@@ -663,21 +773,38 @@ export default function NFTDetailPage() {
                         List for Sale
                       </button>
                     ) : (
-                      <button className="flex-1 bg-red-500 text-white px-6 py-3 rounded-xl hover:bg-red-600 transition-colors flex items-center justify-center gap-2">
-                        <svg
-                          className="w-5 h-5"
-                          fill="none"
-                          stroke="currentColor"
-                          viewBox="0 0 24 24"
-                        >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={2}
-                            d="M6 18L18 6M6 6l12 12"
-                          />
-                        </svg>
-                        Cancel Listing
+                      <button
+                        onClick={handleCancelListing}
+                        disabled={isCancelling}
+                        className={`flex-1 px-6 py-3 rounded-xl transition-colors flex items-center justify-center gap-2 ${
+                          isCancelling
+                            ? "bg-gray-400 text-white cursor-not-allowed"
+                            : "bg-red-500 text-white hover:bg-red-600"
+                        }`}
+                      >
+                        {isCancelling ? (
+                          <>
+                            <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
+                            취소 중...
+                          </>
+                        ) : (
+                          <>
+                            <svg
+                              className="w-5 h-5"
+                              fill="none"
+                              stroke="currentColor"
+                              viewBox="0 0 24 24"
+                            >
+                              <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth={2}
+                                d="M6 18L18 6M6 6l12 12"
+                              />
+                            </svg>
+                            Cancel Listing
+                          </>
+                        )}
                       </button>
                     )}
                     <button className="flex-1 bg-white border-2 border-gray-300 text-gray-700 px-6 py-3 rounded-xl hover:bg-gray-50 transition-colors flex items-center justify-center gap-2">

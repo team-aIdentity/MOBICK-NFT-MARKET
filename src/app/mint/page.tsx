@@ -10,11 +10,11 @@ import {
 } from "thirdweb";
 
 // Pinata API 설정
-const PINATA_API_KEY = "06b4e668dbf10a60fdf1";
+const PINATA_API_KEY = "3e979ece1cf832f29cec";
 const PINATA_SECRET_KEY =
-  "e40a99d458afe825e30032c3d12c8630ae091f4e7363522b3880d744e6783b45";
+  "00db488e73f42be312fdc151cfe0e7024891c975e2990011224517b985e7bf94";
 const PINATA_GATEWAY_TOKEN =
-  "UHWXvO0yfhuWgUiWlPTtdQKSA7Bp1lRpAAXAcYzZ__PuxBCvtJ2W7Brth4Q6V8UI";
+  "NbYiVKRZkFdUvICDdjVwSnCYigS5_qBQPnL-ow5oou-0kGOUbTCoyp5Cwyx_jg8m";
 
 // ⚡ Pinata 업로드 함수들 (최적화)
 const uploadImageToPinata = async (file: File): Promise<string> => {
@@ -840,7 +840,7 @@ export default function MintPage() {
         // IPFS URL을 HTTP 게이트웨이로 변환 (Pinata 커스텀 게이트웨이 사용)
         if (imageUrl.startsWith("ipfs://")) {
           const ipfsHash = imageUrl.replace("ipfs://", "");
-          const httpImageUrl = `https://gray-famous-lemming-869.mypinata.cloud/ipfs/${ipfsHash}?pinataGatewayToken=${PINATA_GATEWAY_TOKEN}`;
+          const httpImageUrl = `https://azure-eldest-ermine-229.mypinata.cloud/ipfs/${ipfsHash}?pinataGatewayToken=${PINATA_GATEWAY_TOKEN}`;
           successUrl.searchParams.set("nftImage", httpImageUrl);
           console.log("🔗 IPFS 이미지를 HTTP로 변환:", httpImageUrl);
         } else {
@@ -861,7 +861,7 @@ export default function MintPage() {
         console.log("🔗 기본 이미지 사용:", defaultImage);
       }
       console.log("📋 최종 성공 URL:", successUrl.toString());
-      successUrl.searchParams.set("gasFee", "0.008 SBMB");
+      successUrl.searchParams.set("gasFee", "0.008 ETH");
       successUrl.searchParams.set("blockNumber", "#18,543,892");
       successUrl.searchParams.set("confirmations", "12 confirmations");
       successUrl.searchParams.set(

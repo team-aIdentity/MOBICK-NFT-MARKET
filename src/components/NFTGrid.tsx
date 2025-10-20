@@ -62,7 +62,9 @@ export default function NFTGrid() {
       fetchSuccess: boolean;
     }[]
   >([]);
+  const [displayedNFTs, setDisplayedNFTs] = useState<typeof nfts>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
   const account = useActiveAccount();
 
   // Marketplace 리스팅된 NFT만 가져오기
@@ -71,14 +73,19 @@ export default function NFTGrid() {
       try {
         setIsLoading(true);
 
-        // Marketplace 컨트랙트 연결
+        // Marketplace 컨트랙트 연결 (최신 주소 사용)
+        const MARKETPLACE_ADDRESS =
+          process.env.NEXT_PUBLIC_MARKETPLACE_ADDRESS ||
+          "0xd2D48B584902260DB216D66508148D25a7b0ef6a";
+
         const marketplaceContract = getContract({
           client: client,
           chain: baseSepolia,
-          address: "0x738c8706366681f143FD3a18Eb477183041c6B59", // Marketplace V3 주소
+          address: MARKETPLACE_ADDRESS,
         });
 
         console.log("🏪 Marketplace에서 리스팅된 NFT 조회 중...");
+        console.log("📍 Marketplace 주소:", MARKETPLACE_ADDRESS);
 
         const formattedNFTs = [];
 
@@ -103,23 +110,72 @@ export default function NFTGrid() {
           totalNFTs = 10;
         }
 
-        // 최대 20개까지만 표시
-        const maxListings = Math.min(totalNFTs, 20);
+        // ⚡ 온체인에서 ACTIVE 리스팅만 조회
+        // totalListings 조회
+        const totalListingsCount = await readContract({
+          contract: marketplaceContract,
+          method: "function totalListings() view returns (uint256)",
+          params: [],
+        });
 
-        // 로컬스토리지에서 판매 중인 NFT만 조회
-        for (let listingId = 0; listingId < maxListings; listingId++) {
-          let tokenId = listingId + 1;
+        console.log("📊 전체 리스팅 개수:", totalListingsCount.toString());
+
+        const maxListingsToCheck = Math.min(Number(totalListingsCount), 100);
+        console.log("🔍 조회할 리스팅 개수:", maxListingsToCheck);
+
+        for (let i = 0; i < maxListingsToCheck; i++) {
           try {
-            // 로컬스토리지에서 판매 정보 확인
-            const listingKey = `listing_${tokenId}`;
-            const storedListing = localStorage.getItem(listingKey);
+            // 각 리스팅 상태 조회
+            const listing = await readContract({
+              contract: marketplaceContract,
+              method:
+                "function getListing(uint256) view returns (uint256,uint256,uint256,uint256,uint128,uint128,address,address,address,uint8,uint8,bool)",
+              params: [BigInt(i)],
+            });
 
-            if (!storedListing) {
-              continue; // 판매 중이 아니면 건너뛰기
+            const [
+              _listingId,
+              tokenId,
+              ,
+              _pricePerToken,
+              ,
+              ,
+              ,
+              _assetContract,
+              _tokenOwner,
+              ,
+              _status,
+            ] = listing;
+
+            console.log(
+              `📋 리스팅 ${i}: tokenId=${tokenId}, status=${_status}, ` +
+                `contract=${_assetContract.slice(0, 10)}..., price=${(
+                  Number(_pricePerToken) / 1e18
+                ).toFixed(2)} SBMB`
+            );
+
+            // ACTIVE 상태(1)이고, 우리 NFT 컨트랙트인 경우만
+            if (_status !== 1) {
+              console.log(
+                `⏭️  리스팅 ${i} 스킵: status=${_status} (1=ACTIVE, 2=COMPLETED, 3=CANCELLED)`
+              );
+              continue;
             }
 
-            const listing = JSON.parse(storedListing);
-            const listingPrice = listing.price;
+            if (
+              _assetContract.toLowerCase() !==
+              NFT_CONTRACT_ADDRESS.toLowerCase()
+            ) {
+              console.log(`⏭️  리스팅 ${i} 스킵: 다른 컨트랙트`);
+              continue;
+            }
+
+            console.log(
+              `✅ 리스팅 ${i} ACTIVE! tokenId=${tokenId}, seller=${_tokenOwner}`
+            );
+
+            const listingPrice = (Number(_pricePerToken) / 1e18).toString();
+            const sellerAddress = _tokenOwner;
 
             // NFT가 실제로 존재하는지 확인
             try {
@@ -130,24 +186,22 @@ export default function NFTGrid() {
                 params: [BigInt(tokenId)],
               });
             } catch {
-              // NFT가 존재하지 않으면 로컬스토리지에서 제거
-              localStorage.removeItem(listingKey);
+              // NFT가 존재하지 않으면 스킵
+              console.log(`⏭️  리스팅 ${i} 스킵: NFT가 존재하지 않음`);
               continue;
             }
-
-            const i = tokenId;
 
             const tokenURIResult = await readContract({
               contract: nftContract,
               method:
                 "function tokenURI(uint256 tokenId) view returns (string)",
-              params: [BigInt(i)],
+              params: [BigInt(tokenId)],
             });
 
             let metadata = null;
             let fetchSuccess = false;
 
-            console.log(`🔍 NFT #${i} tokenURI:`, tokenURIResult);
+            console.log(`🔍 NFT #${tokenId} tokenURI:`, tokenURIResult);
 
             if (tokenURIResult && tokenURIResult.trim() !== "") {
               let urlsToTry = [];
@@ -158,23 +212,26 @@ export default function NFTGrid() {
                   `https://ipfs.io/ipfs/${ipfsHash}`, // thirdweb 기본
                   `https://${ipfsHash}.ipfs.nftstorage.link`, // NFT Storage
                   `https://cloudflare-ipfs.com/ipfs/${ipfsHash}`, // Cloudflare
-                  `https://gray-famous-lemming-869.mypinata.cloud/ipfs/${ipfsHash}`, // Pinata 커스텀
+                  `https://azure-eldest-ermine-229.mypinata.cloud/ipfs/${ipfsHash}`, // Pinata 커스텀
                 ];
               } else {
                 urlsToTry = [tokenURIResult];
               }
 
               for (const url of urlsToTry) {
-                console.log(`📡 NFT #${i} 메타데이터 시도:`, url);
+                console.log(`📡 NFT #${tokenId} 메타데이터 시도:`, url);
                 const result = await safeFetch(url, 10000); // 타임아웃 10초로 증가
                 if (result.success) {
                   metadata = result.data;
                   fetchSuccess = true;
-                  console.log(`✅ NFT #${i} 메타데이터 성공:`, metadata);
-                  console.log(`📝 NFT #${i} 이름:`, metadata?.name);
+                  console.log(`✅ NFT #${tokenId} 메타데이터 성공:`, metadata);
+                  console.log(`📝 NFT #${tokenId} 이름:`, metadata?.name);
                   break;
                 } else {
-                  console.log(`❌ NFT #${i} 메타데이터 실패:`, result.error);
+                  console.log(
+                    `❌ NFT #${tokenId} 메타데이터 실패:`,
+                    result.error
+                  );
                 }
               }
             }
@@ -185,34 +242,39 @@ export default function NFTGrid() {
               tokenURIResult &&
               tokenURIResult.startsWith("ipfs://")
             ) {
-              console.log(`🔄 NFT #${i} 메타데이터 재시도...`);
+              console.log(`🔄 NFT #${tokenId} 메타데이터 재시도...`);
               const ipfsHash = tokenURIResult.replace("ipfs://", "");
               const retryUrl = `https://ipfs.io/ipfs/${ipfsHash}`;
-              console.log(`📡 NFT #${i} 재시도 URL:`, retryUrl);
+              console.log(`📡 NFT #${tokenId} 재시도 URL:`, retryUrl);
               const retryResult = await safeFetch(retryUrl, 15000);
               if (retryResult.success) {
                 metadata = retryResult.data;
                 fetchSuccess = true;
-                console.log(`✅ NFT #${i} 재시도 성공:`, metadata);
-                console.log(`📝 NFT #${i} 이름:`, metadata?.name);
+                console.log(`✅ NFT #${tokenId} 재시도 성공:`, metadata);
+                console.log(`📝 NFT #${tokenId} 이름:`, metadata?.name);
               }
             }
 
             if (!fetchSuccess) {
-              console.log(`⚠️ NFT #${i} 메타데이터 조회 실패 - 기본 이름 사용`);
+              console.log(
+                `⚠️ NFT #${tokenId} 메타데이터 조회 실패 - 기본 이름 사용`
+              );
             }
 
             // 메타데이터 가져오기 실패 시에도 기본 정보로 NFT 표시
+            console.log(
+              `➕ NFT 추가: listingId=${i}, tokenId=${tokenId}, 가격=${listingPrice} SBMB, seller=${sellerAddress}`
+            );
             formattedNFTs.push({
-              id: i, // tokenId와 동일
+              id: Number(tokenId), // tokenId를 id로 사용
               name:
                 metadata &&
                 typeof metadata === "object" &&
                 "name" in metadata &&
                 typeof metadata.name === "string"
                   ? metadata.name
-                  : `춘심이네 NFT #${i}`,
-              collection: "춘심이네 NFT Collection",
+                  : `NFT #${tokenId}`,
+              collection: "NFT Collection",
               price: `${listingPrice} SBMB`,
               image:
                 metadata &&
@@ -221,17 +283,17 @@ export default function NFTGrid() {
                 typeof metadata.image === "string"
                   ? convertIPFSUrl(metadata.image) // ⚡ IPFS URL 변환
                   : "🎨",
-              creator: "춘심이네",
+              creator: sellerAddress, // ⚡ 판매자 지갑 주소
               category: "아트",
               categoryColor: "bg-green-500",
-              tokenId: i,
+              tokenId: Number(tokenId),
               tokenURI: tokenURIResult,
               metadata: metadata,
               fetchSuccess: fetchSuccess,
             });
           } catch (error) {
             console.error(
-              `Listing #${listingId} (NFT #${tokenId}) 가져오기 실패:`,
+              `Listing #${i} (tokenId=${tokenId}) 가져오기 실패:`,
               error
             );
           }
@@ -240,9 +302,12 @@ export default function NFTGrid() {
         console.log("✅ 조회된 NFT 개수:", formattedNFTs.length);
         console.log("📋 NFT 데이터:", formattedNFTs);
         setNfts(formattedNFTs);
+        // 초기 4개만 표시
+        setDisplayedNFTs(formattedNFTs.slice(0, 4));
       } catch (error) {
         console.error("NFT 가져오기 실패:", error);
         setNfts([]); // 에러 시 빈 배열
+        setDisplayedNFTs([]);
       } finally {
         setIsLoading(false);
       }
@@ -254,8 +319,20 @@ export default function NFTGrid() {
   // 카테고리별 필터링
   const filteredNFTs =
     selectedCategory === "전체"
-      ? nfts
-      : nfts.filter((nft) => nft.category === selectedCategory);
+      ? displayedNFTs
+      : displayedNFTs.filter((nft) => nft.category === selectedCategory);
+
+  // Load More 버튼 핸들러
+  const handleLoadMore = () => {
+    setIsLoadingMore(true);
+    const currentCount = displayedNFTs.length;
+    const nextBatch = nfts.slice(currentCount, currentCount + 4);
+    setDisplayedNFTs([...displayedNFTs, ...nextBatch]);
+    setIsLoadingMore(false);
+  };
+
+  // 더 로드할 NFT가 있는지 확인
+  const hasMoreNFTs = displayedNFTs.length < nfts.length;
 
   return (
     <section className="py-16 bg-white">
@@ -425,12 +502,17 @@ export default function NFTGrid() {
                   </h3>
                   <p className="text-sm text-gray-600 mb-3">{nft.collection}</p>
 
-                  {/* 크리에이터 정보 */}
+                  {/* 판매자 정보 */}
                   <div className="flex items-center mb-4">
                     <div className="w-6 h-6 bg-teal-500 rounded-full flex items-center justify-center text-white text-xs font-bold mr-2">
-                      {nft.creator.charAt(0)}
+                      {nft.creator.slice(2, 4).toUpperCase()}
                     </div>
-                    <span className="text-sm text-gray-700">{nft.creator}</span>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs text-gray-500 mb-0.5">Seller</p>
+                      <p className="text-xs font-mono text-gray-700 truncate">
+                        {nft.creator.slice(0, 6)}...{nft.creator.slice(-4)}
+                      </p>
+                    </div>
                   </div>
 
                   {/* 가격 정보 */}
@@ -475,24 +557,58 @@ export default function NFTGrid() {
         )}
 
         {/* Load More 버튼 */}
-        <div className="text-center">
-          <button className="border-2 border-teal-500 text-teal-500 px-8 py-3 rounded-lg font-semibold hover:bg-teal-50 transition-colors flex items-center mx-auto">
-            Load More NFTs
-            <svg
-              className="w-5 h-5 ml-2"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
+        {hasMoreNFTs && (
+          <div className="text-center">
+            <button
+              onClick={handleLoadMore}
+              disabled={isLoadingMore}
+              className="border-2 border-teal-500 text-teal-500 px-8 py-3 rounded-lg font-semibold hover:bg-teal-50 transition-colors flex items-center mx-auto disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M19 9l-7 7-7-7"
-              />
-            </svg>
-          </button>
-        </div>
+              {isLoadingMore ? (
+                <>
+                  <svg
+                    className="animate-spin h-5 w-5 mr-2"
+                    xmlns="http://www.w3.org/2000/svg"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                  >
+                    <circle
+                      className="opacity-25"
+                      cx="12"
+                      cy="12"
+                      r="10"
+                      stroke="currentColor"
+                      strokeWidth="4"
+                    ></circle>
+                    <path
+                      className="opacity-75"
+                      fill="currentColor"
+                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                    ></path>
+                  </svg>
+                  Loading...
+                </>
+              ) : (
+                <>
+                  Load More NFTs
+                  <svg
+                    className="w-5 h-5 ml-2"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M19 9l-7 7-7-7"
+                    />
+                  </svg>
+                </>
+              )}
+            </button>
+          </div>
+        )}
       </div>
     </section>
   );
